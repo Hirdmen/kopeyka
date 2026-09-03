@@ -16,6 +16,15 @@ import imaplib
 import email
 import email.header
 import threading
+import sys
+import shutil
+import subprocess
+import tempfile
+import webbrowser
+import zipfile
+import urllib.request
+import urllib.error
+from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.metrics import dp
@@ -52,6 +61,13 @@ os.makedirs(DATA_DIR, exist_ok=True)
 PDF_DIR = DATA_DIR
 CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
+APP_NAME = "Расчетки"
+APP_VERSION = "1.0.1"
+GITHUB_REPO = "Hirdmen/kopeyka"
+DEV_NAME = "Hirdmen"
+DEV_EMAIL = "hird78lvl@yandex.ru"
+DONATE_URL = "https://c2c.cbrpay.ru/AS1I0034FA1DBA2G8IJAPIBMBTBR13O1"
+QR_PATH = os.path.join(APP_DIR, "donate_qr.png")
 
 # ── палитра ────────────────────────────────────────────────
 BG = (0.07, 0.08, 0.10, 1)
@@ -141,6 +157,20 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+# ── обновления ────────────────────────────────────────
+def _ver_tuple(s):
+    return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3])
+
+
+def github_latest_release():
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Kopeyka/" + APP_VERSION,
+                      "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
 
 
 # ── стиль-виджеты ──────────────────────────────────────────
@@ -375,6 +405,33 @@ class MainScreen(MDScreen):
         )
         self.refresh_list()
 
+    def reparse_pdfs(self, *a):
+        self.log_line("→ Переразбираю архив PDF по текущим правилам…")
+        threading.Thread(target=self._reparse_worker, daemon=True).start()
+
+    def _reparse_worker(self):
+        app = MDApp.get_running_app()
+        rows = app.db.execute("SELECT email, filename FROM payslips").fetchall()
+        done = 0
+        for addr, fname in rows:
+            acc = next((x for x in app.cfg["accounts"] if x["email"] == addr), None)
+            base = (acc.get("save_dir") if acc else "") or PDF_DIR
+            path = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr), fname)
+            if not os.path.exists(path):
+                self.log_line(f"Нет файла на диске: {fname}")
+                continue
+            try:
+                text = pdf_parser.extract_text_from_pdf(
+                    path, acc.get("pdf_password") if acc else None
+                )
+                parsed = pdf_parser.parse_payslip_text(text)
+                storage.save(app.db, addr, fname, parsed)
+                done += 1
+            except Exception as e:
+                self.log_line(f"Ошибка разбора {fname}: {e}")
+        self.log_line(f"Переразбор готов: {done}. Имена кодов обновлены.")
+        Clock.schedule_once(lambda dt: self.refresh_list())
+
     def log_line(self, s):
         Clock.schedule_once(
             lambda dt: setattr(self.log, "text", self.log.text + s + "\n")
@@ -426,11 +483,12 @@ class MainScreen(MDScreen):
     def open_menu(self, *a):
         box = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
         box.bind(minimum_height=box.setter("height"))
-        popup = Popup(title="Меню", content=box, size_hint=(0.9, 0.45))
+        popup = Popup(title="Меню", content=box, size_hint=(0.9, 0.55))
         for txt, cb in (
-            ("Настройки почт", lambda: self.go("settings")),
+            ("Настройки почты", lambda: self.go("settings")),
             ("Справочник кодов АВТОВАЗ", lambda: self.go("codes")),
-            ("Обновить список", self.refresh_list),
+            ("О программе", lambda: self.go("about")),
+            ("Переразобрать PDF", self.reparse_pdfs),
         ):
             b = AccentButton(text=txt, size_hint_y=None, height=dp(48))
             b.bind(on_release=lambda *a, c=cb: (c(), popup.dismiss()))
@@ -478,7 +536,8 @@ class MainScreen(MDScreen):
                     names.append(_from_utf7(txt.split(' "')[-2]))
             raise Exception(f'Папка "{folder}" не найдена. На сервере: {names}')
         since = acc.get("_since")
-        if since:
+        acc.pop("_since", None)  # лимит автопроверки используется один раз
+        if since and not full:
             _, data = conn.search(None, "SINCE", since)
         else:
             _, data = conn.search(None, "ALL")
@@ -610,14 +669,30 @@ class AccountForm(Card):
     def __init__(self, data=None, **kw):
         super().__init__(**kw)
         d = data or {}
+        self.hdr = left_label(f"[b]{d.get('email') or 'Новый ящик'}[/b]", TEXT, "15sp")
+        self.add_widget(self.hdr)
+
+        self.add_widget(left_label("EMAIL", DIM, "12sp"))
         self.f_email = MDTextField(
             hint_text="Email", text=d.get("email", ""), size_hint_y=None, height=dp(62)
         )
+        self.f_email.bind(
+            text=lambda i, v: setattr(self.hdr, "text", f"[b]{v or 'Новый ящик'}[/b]")
+        )
         self.add_widget(self.f_email)
+        self.add_widget(
+            left_label("Сервер определится автоматически по домену", DIM, "11sp")
+        )
+
+        self.add_widget(left_label("ПАРОЛЬ ПРИЛОЖЕНИЯ (IMAP)", DIM, "12sp"))
         r1, self.f_pass = password_row(d.get("password", ""), "Пароль приложения")
         self.add_widget(r1)
+
+        self.add_widget(left_label("ПАРОЛЬ ОТ PDF РАСЧЕТОК", DIM, "12sp"))
         r2, self.f_pdf = password_row(d.get("pdf_password", ""), "Пароль PDF")
         self.add_widget(r2)
+
+        self.add_widget(left_label("ПАПКА НА ПОЧТЕ · IMAP", DIM, "12sp"))
         self.f_folder = MDTextField(
             hint_text="Папка на почте (INBOX)",
             text=d.get("folder", "INBOX"),
@@ -625,8 +700,10 @@ class AccountForm(Card):
             height=dp(62),
         )
         self.add_widget(self.f_folder)
+
+        self.add_widget(left_label("ПАПКА ЗАГРУЗКИ PDF · НЕОБЯЗАТЕЛЬНО", DIM, "12sp"))
         self.f_save = MDTextField(
-            hint_text="Папка загрузки (необязательно)", text=d.get("save_dir", "")
+            hint_text="Пусто → внутренняя payslips/<email>/", text=d.get("save_dir", "")
         )
         browse = IconButton(text="…")
         browse.bind(on_release=self.browse)
@@ -662,7 +739,7 @@ class SettingsScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
-        root.add_widget(TopBar("Настройки почт", back_cb=self.back))
+        root.add_widget(TopBar("Настройки почты", back_cb=self.back))
         self.forms_box = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
         self.forms_box.bind(minimum_height=self.forms_box.setter("height"))
         sv = ScrollView(do_scroll_y=True)
@@ -705,29 +782,283 @@ class SettingsScreen(MDScreen):
 class CodesScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.names = {}
+        self.usage = {}
+        self._last_q = ""
+        Clock.schedule_interval(self._watch_text, 0.2)
         root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
         root.add_widget(TopBar("Справочник кодов АВТОВАЗ", back_cb=self.back))
-        self.box = GridLayout(cols=1, size_hint_y=None, spacing=dp(2), padding=dp(6))
+        srow = BoxLayout(size_hint_y=None, height=dp(62), spacing=dp(6))
+        self.search_field = MDTextField(
+            hint_text="Код или название: 813, премия…",
+            size_hint_y=None, height=dp(62))
+        self.search_field.bind(on_text_validate=self.do_search)
+        find_btn = AccentButton(text="Найти", size_hint_x=None, width=dp(90))
+        find_btn.bind(on_release=self.do_search)
+        srow.add_widget(self.search_field)
+        srow.add_widget(find_btn)
+        root.add_widget(srow)
+        self.box = GridLayout(cols=1, size_hint_y=None, spacing=dp(4), padding=dp(6))
         self.box.bind(minimum_height=self.box.setter("height"))
         sv = ScrollView(do_scroll_y=True)
         sv.add_widget(self.box)
         root.add_widget(sv)
         self.add_widget(root)
 
+    def _watch_text(self, dt):
+        t = self.search_field.text
+        if t != self._last_q:
+            self._last_q = t
+            self._render(t)
+
     def back(self, *a):
+        # Назад №1: стереть запрос и сразу показать весь список
+        if self.search_field.text.strip():
+            self.search_field.text = ""
+            self._render("")
+            return
+        # Назад №2: список уже полный — уходим в Меню
         self.manager.current = "main"
+        Clock.schedule_once(
+            lambda dt: self.manager.get_screen("main").open_menu(), 0.15)
 
     def on_enter(self):
         app = MDApp.get_running_app()
-        names = dict(pdf_parser.CODE_NAMES)
+        self.names = dict(pdf_parser.CODE_NAMES)
         for code, name in app.db.execute("""SELECT code, name FROM payslip_codes
-                   WHERE id IN (SELECT MIN(id) FROM payslip_codes
+                   WHERE id IN (SELECT MAX(id) FROM payslip_codes
                                 GROUP BY code)"""):
-            names[code] = name
+            self.names[code] = name
+        self.usage = dict(app.db.execute(
+            "SELECT code, COUNT(DISTINCT payslip_id) "
+            "FROM payslip_codes GROUP BY code"))
+        self._last_q = self.search_field.text
+        self._render(self.search_field.text)
+
+    def _render(self, q=""):
         self.box.clear_widgets()
-        for code in sorted(names):
-            col = RED if int(code) >= 400 else GREEN
-            self.box.add_widget(left_label(f"[b]{code}[/b]  {names[code]}", col))
+        q = (q or "").strip().lower()
+        items = sorted(self.names.items())
+        if q:
+            items = [(c, n) for c, n in items if q in c or q in (n or "").lower()]
+        if not items:
+            self.box.add_widget(left_label(f"Код не найден: {q}", DIM))
+            return
+        for code, name in items:
+            hexcol = "FF6B66" if int(code) >= 400 else "66BB6A"
+            cnt = f"  [color=9AA5B5]×{self.usage[code]}[/color]" \
+                if code in self.usage else ""
+            row = CardButton(
+                text=f"[b][color={hexcol}]{code}[/color][/b]  {name}{cnt}",
+                size_hint_y=None, height=dp(44))
+            row.bind(on_release=lambda *a, c=code: self.show_code(c))
+            self.box.add_widget(row)
+
+    def do_search(self, *a):
+        q = self.search_field.text.strip()
+        if not q:
+            self._render("")
+            return
+        if len(q) == 3 and q.isdigit():
+            self._render(q)
+            if q in self.names:
+                self.show_code(q)
+            else:
+                Popup(title=f"Код {q}",
+                      content=left_label(
+                          "Код не найден в справочнике и в расчетках.", DIM),
+                      size_hint=(0.85, 0.3)).open()
+        else:
+            self._render(q)
+
+    def show_code(self, code):
+        name = self.names.get(code, f"Код {code}")
+        ded = int(code) >= 400
+        n = self.usage.get(code)
+        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
+        box.add_widget(left_label(
+            f"[b][color={'FF6B66' if ded else '66BB6A'}]{code}[/color][/b]",
+            TEXT, "24sp"))
+        box.add_widget(left_label(name, TEXT, "15sp"))
+        box.add_widget(left_label(
+            f"[color={'FF6B66' if ded else '66BB6A'}]"
+            f"{'УДЕРЖАНИЕ' if ded else 'НАЧИСЛЕНИЕ'}[/color]", TEXT, "13sp"))
+        box.add_widget(left_label(
+            f"Встречался в расчетках: {n}" if n
+            else "В расчетках еще не встречался", DIM, "13sp"))
+        Popup(title=f"Код {code}", content=box, size_hint=(0.85, 0.4)).open()
+
+
+class AboutScreen(MDScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
+        root.add_widget(TopBar("О программе", back_cb=self.back))
+        box = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
+        box.bind(minimum_height=box.setter("height"))
+        sv = ScrollView(do_scroll_y=True)
+        sv.add_widget(box)
+        root.add_widget(sv)
+        self.add_widget(root)
+
+        c = Card()
+        c.add_widget(left_label(f"[b]{APP_NAME}[/b] · v{APP_VERSION}", TEXT, "18sp"))
+        c.add_widget(
+            left_label(
+                "Личный расшифровщик расчеток: следит за почтой, скачивает "
+                "расчетные листки, снимает пароль с PDF и показывает все цифры "
+                "крупно и понятно. PDF остается как архив.",
+                DIM,
+            )
+        )
+        c.add_widget(left_label(f"Разработчик: [b]{DEV_NAME}[/b]", TEXT))
+        box.add_widget(c)
+
+        c = Card()
+        c.add_widget(left_label("[b]Связь[/b]", TEXT, "15sp"))
+        b = AccentButton(
+            text="Написать на почту — баги, пожелания", size_hint_y=None, height=dp(46)
+        )
+        b.bind(on_release=lambda *a: webbrowser.open(f"mailto:{DEV_EMAIL}"))
+        c.add_widget(b)
+        b = AccentButton(text="Проект на GitHub", size_hint_y=None, height=dp(46))
+        b.bind(
+            on_release=lambda *a: webbrowser.open(f"https://github.com/{GITHUB_REPO}")
+        )
+        c.add_widget(b)
+        box.add_widget(c)
+
+        c = Card()
+        c.add_widget(left_label("[b]Поддержка[/b]", TEXT, "15sp"))
+        c.add_widget(
+            left_label(
+                "Если программа полезна — угости разработчика кофе "
+                "(СБП: откроется банковское приложение с формой перевода).",
+                DIM,
+            )
+        )
+        b = AccentButton(text="Кофе разработчику", size_hint_y=None, height=dp(46))
+        b.bind(on_release=lambda *a: webbrowser.open(DONATE_URL))
+        c.add_widget(b)
+        b = AccentButton(
+            text="Показать QR для перевода", size_hint_y=None, height=dp(46)
+        )
+        b.bind(on_release=self.show_qr)
+        c.add_widget(b)
+        box.add_widget(c)
+
+        c = Card()
+        c.add_widget(left_label("[b]Обновления[/b]", TEXT, "15sp"))
+        self.upd_btn = AccentButton(
+            text="Проверить обновления", size_hint_y=None, height=dp(46)
+        )
+        self.upd_btn.bind(on_release=self.do_update)
+        c.add_widget(self.upd_btn)
+        self.upd_status = left_label(f"Текущая версия: v{APP_VERSION}", DIM)
+        c.add_widget(self.upd_status)
+        box.add_widget(c)
+
+    def back(self, *a):
+        self.manager.current = "main"
+
+    def _status(self, s):
+        Clock.schedule_once(lambda dt: setattr(self.upd_status, "text", s))
+
+    def show_qr(self, *a):
+        box = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(10))
+        if os.path.exists(QR_PATH):
+            img = Image(source=QR_PATH, size_hint_y=None, height=dp(260))
+            box.add_widget(img)
+            box.add_widget(
+                left_label(
+                    "Наведите камеру телефона — откроется банковское "
+                    "приложение с формой перевода суммы.",
+                    DIM,
+                )
+            )
+        else:
+            box.add_widget(
+                left_label(
+                    "Файл не найден: положите donate_qr.png рядом с программой.", DIM
+                )
+            )
+        Popup(title="СБП: кофе разработчику", content=box, size_hint=(0.8, 0.65)).open()
+
+    def do_update(self, *a):
+        self.upd_btn.disabled = True
+        self._status("Проверяю обновления…")
+        threading.Thread(target=self._update_worker, daemon=True).start()
+
+    def _update_worker(self):
+        try:
+            rel = github_latest_release()
+            tag = (rel.get("tag_name") or "").lstrip("v")
+            page = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+            if _ver_tuple(tag) <= _ver_tuple(APP_VERSION):
+                self._status(f"У вас последняя версия: v{APP_VERSION}.")
+                return
+            asset = next(
+                (
+                    a
+                    for a in rel.get("assets", [])
+                    if a["name"].lower().endswith(".zip")
+                ),
+                None,
+            )
+            if not getattr(sys, "frozen", False) or not asset:
+                self._status(
+                    f"Доступна v{tag}! Автообновление — в собранной "
+                    f"версии; открываю страницу релиза…"
+                )
+                webbrowser.open(page)
+                return
+            self._status(f"Качаю v{tag}…")
+            zip_path = os.path.join(tempfile.gettempdir(), asset["name"])
+            urllib.request.urlretrieve(asset["browser_download_url"], zip_path)
+            self._status("Распаковываю…")
+            staging = os.path.join(tempfile.gettempdir(), "kopeyka_update")
+            if os.path.isdir(staging):
+                shutil.rmtree(staging)
+            with zipfile.ZipFile(zip_path) as z:
+                z.extractall(staging)
+            self._apply_update(staging)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                self._status("Обновлений не найдено — у вас актуальная версия.")
+            else:
+                self._status(f"Ошибка обновления: {e}")
+        except Exception as e:
+            self._status(f"Ошибка обновления: {e}")
+        finally:
+            k.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
+
+    def _apply_update(self, staging):
+        app_dir = os.path.dirname(sys.executable)
+        exe = sys.executable
+        ps1 = os.path.join(tempfile.gettempdir(), "kopeyka_update.ps1")
+        with open(ps1, "w", encoding="utf-8-sig") as f:
+            f.write(
+                "Start-Sleep -Seconds 3\n"
+                f"Copy-Item -LiteralPath '{staging}\\*' "
+                f"-Destination '{app_dir}' -Recurse -Force\n"
+                f"Start-Process -FilePath '{exe}'\n"
+                f"Remove-Item -LiteralPath '{ps1}' -Force\n"
+                f"Remove-Item -LiteralPath '{staging}' -Recurse -Force\n"
+            )
+        self._status("Обновление загружено. Перезапуск…")
+        subprocess.Popen(
+            [
+                "powershell",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+                ps1,
+            ],
+            creationflags=0x00000008,
+        )  # DETACHED_PROCESS
+        Clock.schedule_once(lambda dt: os._exit(0), 1.5)
 
 
 class SalaryApp(MDApp):
@@ -748,6 +1079,7 @@ class SalaryApp(MDApp):
         self.sm.add_widget(DetailScreen(name="detail"))
         self.sm.add_widget(SettingsScreen(name="settings"))
         self.sm.add_widget(CodesScreen(name="codes"))
+        self.sm.add_widget(AboutScreen(name="about"))
         Clock.schedule_once(lambda dt: self.auto_check(), 1.5)
         return self.sm
 

@@ -37,6 +37,12 @@ def connect(db_path='salary.db'):
         sum REAL,
         hours REAL,
         FOREIGN KEY(payslip_id) REFERENCES payslips(id))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS user_profile (
+        email TEXT PRIMARY KEY,
+        fio TEXT, enterprise TEXT, perm_number TEXT, tab_number TEXT,
+        position_code TEXT, grade TEXT, calc_date TEXT,
+        position_name TEXT, hire_date TEXT, birthday TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
     db.commit()
     return db
 
@@ -72,6 +78,15 @@ def save(db, email_addr, filename, data):
                  names.get(code) or pdf_parser.CODE_NAMES.get(code)
                  or f'Код {code}',
                  v['sum'], v['hours']))
+        # приоритет электронной расчетки: справочник нового PDF
+    # переписывает ячейки имен во всех расчетках, где имя отличается
+    for code, nm in names.items():
+        if nm:
+            db.execute(
+                "UPDATE payslip_codes SET name=? WHERE code=? AND name<>?",
+                (nm, code, nm))
+        if data.get('profile'):
+            save_profile(db, email_addr, data['profile'])   
     db.commit()
 
 
@@ -98,3 +113,76 @@ def get(db, payslip_id):
            WHERE payslip_id=? ORDER BY kind DESC, code""",
         (payslip_id,)).fetchall()
     return d
+# ── профиль пользователя ───────────────────────────────
+def save_profile(db, email_addr, profile):
+    db.execute("""INSERT INTO user_profile
+        (email, fio, enterprise, perm_number, tab_number,
+         position_code, grade, calc_date)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(email) DO UPDATE SET
+          fio=excluded.fio, enterprise=excluded.enterprise,
+          perm_number=excluded.perm_number, tab_number=excluded.tab_number,
+          position_code=excluded.position_code, grade=excluded.grade,
+          calc_date=excluded.calc_date, updated_at=CURRENT_TIMESTAMP""",
+        (email_addr, profile.get('fio'), profile.get('enterprise'),
+         profile.get('perm_number'), profile.get('tab_number'),
+         profile.get('position_code'), profile.get('grade'),
+         profile.get('calc_date')))
+    db.commit()
+
+def get_profile(db, email_addr):
+    row = db.execute("SELECT * FROM user_profile WHERE email=?",
+                     (email_addr,)).fetchone()
+    if not row:
+        return None
+    cols = [c[1] for c in db.execute("PRAGMA table_info(user_profile)")]
+    return dict(zip(cols, row))
+
+def update_profile_manual(db, email_addr, fields):
+    """Ручные поля карточки: hire_date, birthday, position_name."""
+    db.execute("INSERT OR IGNORE INTO user_profile (email) VALUES (?)",
+               (email_addr,))
+    for k, v in fields.items():
+        db.execute(f"UPDATE user_profile SET {k}=? WHERE email=?",
+                   (v, email_addr))
+    db.commit()
+
+# ── агрегаты для плиток ────────────────────────────────
+def _ids_for_mode(db, email_addr, mode):
+    rows = db.execute("SELECT id, period FROM payslips WHERE email=?",
+                      (email_addr,)).fetchall()
+    if not rows:
+        return []
+    if mode in (None, 'all'):
+        return [r[0] for r in rows]
+    keys = [(_period_key(r), r[0]) for r in rows]
+    max_key = max(k for k, _ in keys)
+    if mode == 'month':
+        return [i for k, i in keys if k == max_key]
+    return [i for k, i in keys if k // 100 == max_key // 100]
+
+def sums_for_codes(db, email_addr, codes, mode='month'):
+    ids = _ids_for_mode(db, email_addr, mode)
+    if not ids or not codes:
+        return {'sum': 0.0, 'hours': 0.0}
+    row = db.execute(
+        f"""SELECT COALESCE(SUM(sum),0), COALESCE(SUM(hours),0)
+            FROM payslip_codes
+            WHERE payslip_id IN ({','.join('?' * len(ids))})
+              AND code IN ({','.join('?' * len(codes))})""",
+        ids + list(codes)).fetchone()
+    return {'sum': row[0] or 0.0, 'hours': row[1] or 0.0}
+
+def paid_sum(db, email_addr, mode='year'):
+    ids = _ids_for_mode(db, email_addr, mode)
+    if not ids:
+        return 0.0
+    row = db.execute(
+        f"SELECT COALESCE(SUM(paid),0) FROM payslips "
+        f"WHERE id IN ({','.join('?' * len(ids))})", ids).fetchone()
+    return row[0] or 0.0
+
+def code_usage(db):
+    return dict(db.execute(
+        "SELECT code, COUNT(DISTINCT payslip_id) FROM payslip_codes "
+        "GROUP BY code"))    
