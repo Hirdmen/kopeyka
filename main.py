@@ -812,8 +812,9 @@ class AccountForm(Card):
         self.add_widget(self.f_folder)
 
         self.add_widget(left_label("ПАПКА ЗАГРУЗКИ PDF · НЕОБЯЗАТЕЛЬНО", DIM, "12sp"))
+        self.add_widget(left_label(f"По умолчанию: {PDF_DIR}", DIM, "11sp"))
         self.f_save = MDTextField(
-            hint_text="Пусто → внутренняя payslips/<email>/", text=d.get("save_dir", "")
+            hint_text="Пусто → папка по умолчанию", text=d.get("save_dir", "")
         )
         browse = IconButton(text="…")
         browse.bind(on_release=self.browse)
