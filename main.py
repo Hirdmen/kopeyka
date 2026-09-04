@@ -8,6 +8,8 @@ buildozer: requirements = python3,kivy,kivymd,pypdf | INTERNET
 from kivy.config import Config
 
 Config.set("input", "mouse", "mouse,disable_multitouch")
+Config.set("graphics", "vsync", 1)
+Config.set("graphics", "maxfps", 60)
 
 import os
 import re
@@ -65,6 +67,7 @@ else:
 DATA_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Расчетки")
 os.makedirs(DATA_DIR, exist_ok=True)
 PDF_DIR = DATA_DIR
+PAYSLIP_PREFIX = "rasch_list"
 CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
 APP_NAME = "Расчетки"
@@ -574,6 +577,8 @@ class MainScreen(MDScreen):
                 fname = str(email.header.make_header(email.header.decode_header(fname)))
                 if not fname.lower().endswith(".pdf"):
                     continue
+                if not fname.lower().startswith(PAYSLIP_PREFIX):
+                    continue
                 exists = storage.exists(app.db, addr, fname)
                 if exists and not full:
                     stop = True
@@ -594,6 +599,10 @@ class MainScreen(MDScreen):
                         path, acc.get("pdf_password")
                     )
                     parsed = pdf_parser.parse_payslip_text(text)
+                    if not parsed.get("period") and parsed.get("paid") is None:
+                        os.remove(path)
+                        self.log_line(f"Пропуск {fname}: не похоже на расчетку")
+                        continue
                     storage.save(app.db, addr, fname, parsed)
                     done += 1
                     self.log_line(
