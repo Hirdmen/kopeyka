@@ -12,14 +12,37 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build APK with Docker
+    - name: Install system dependencies
       run: |
-        docker run --rm \
-          -v $(pwd):/app \
-          -v ~/.buildozer:/home/user/.buildozer \
-          -w /app \
-          kivy/buildozer:latest \
-          buildozer android debug
+        sudo apt-get update
+        sudo apt-get install -y \
+          git zip unzip \
+          openjdk-17-jdk \
+          autoconf libtool pkg-config \
+          zlib1g-dev libncurses5-dev \
+          libncursesw5-dev libtinfo5 \
+          cmake libffi-dev libssl-dev \
+          python3-pip python3-dev
+    
+    - name: Install Python 3.11 via deadsnakes
+      run: |
+        sudo apt-get install -y software-properties-common
+        sudo add-apt-repository ppa:deadsnakes/ppa -y
+        sudo apt-get update
+        sudo apt-get install -y python3.11 python3.11-dev python3.11-venv python3.11-distutils
+        
+        # Создаем симлинк для python3.11 как python3.11
+        # НЕ заменяем системный python3!
+    
+    - name: Install Buildozer with Python 3.11
+      run: |
+        python3.11 -m pip install --upgrade pip
+        python3.11 -m pip install buildozer cython
+    
+    - name: Build APK
+      run: |
+        # Используем Python 3.11 явно
+        python3.11 -m buildozer android debug
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
