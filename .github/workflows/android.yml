@@ -49,6 +49,7 @@ jobs:
       run: |
         buildozer android debug
       env:
+        JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
         ANDROID_SDK_HOME: /home/runner/.android
         ANDROID_NDK_HOME: /home/runner/.android/ndk
     
