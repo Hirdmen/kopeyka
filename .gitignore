@@ -5,3 +5,7 @@ __pycache__/
 *.pyo
 .vscode/
 .idea/
+build/
+dist/
+__pycache__/
+main.spec
