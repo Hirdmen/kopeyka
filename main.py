@@ -55,7 +55,13 @@ try:
 except ImportError:
     pass
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
+import sys
+if getattr(sys, 'frozen', False):
+    # PyInstaller режим: файлы в sys._MEIPASS
+    APP_DIR = sys._MEIPASS
+else:
+    # Режим разработки
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Расчетки")
 os.makedirs(DATA_DIR, exist_ok=True)
 PDF_DIR = DATA_DIR
