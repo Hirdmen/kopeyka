@@ -22,7 +22,7 @@ source.exclude_patterns = *.pyc,__pycache__,build,dist,.git,.github,*.spec
 version = 1.0.1
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,pypdf,requests
+requirements = python3,kivy==2.3.1,kivymd==2.0.0,pypdf,requests
 
 # (list) Supported orientations
 orientation = portrait
