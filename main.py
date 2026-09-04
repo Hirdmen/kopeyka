@@ -359,8 +359,19 @@ def password_row(initial="", hint="Пароль"):
     row.add_widget(eye)
     return row, field
 
+def decrypt_pdf_bytes(data, password):
+    import io
+    from pypdf import PdfReader, PdfWriter
+    r = PdfReader(io.BytesIO(data))
+    if not r.is_encrypted:
+        return data
+    r.decrypt(password or "")
+    w = PdfWriter()
+    w.append_pages_from_reader(r)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
 
-# ── экраны ─────────────────────────────────────────────────
 class MainScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -545,7 +556,7 @@ class MainScreen(MDScreen):
         app = MDApp.get_running_app()
         first_run = not storage.list_payslips(app.db, addr)
         self.log_line(f"Писем к просмотру: {len(ids)}")
-        new = 0
+        done = 0
         for num in ids:
             stop = False
             _, md = conn.fetch(num, "(RFC822)")
@@ -557,13 +568,14 @@ class MainScreen(MDScreen):
                 fname = str(email.header.make_header(email.header.decode_header(fname)))
                 if not fname.lower().endswith(".pdf"):
                     continue
-                if storage.exists(app.db, addr, fname):
-                    if not full:
-                        stop = True
+                exists = storage.exists(app.db, addr, fname)
+                if exists and not full:
+                    stop = True
                     continue
                 payload = part.get_payload(decode=True)
                 if not payload:
                     continue
+                payload = decrypt_pdf_bytes(payload, acc.get("pdf_password") or "")
                 base = acc.get("save_dir") or PDF_DIR
                 acc_dir = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr))
                 os.makedirs(acc_dir, exist_ok=True)
@@ -577,7 +589,7 @@ class MainScreen(MDScreen):
                     )
                     parsed = pdf_parser.parse_payslip_text(text)
                     storage.save(app.db, addr, fname, parsed)
-                    new += 1
+                    done += 1
                     self.log_line(
                         f'OK {parsed.get("period")}: получка {parsed.get("paid")}'
                     )
@@ -586,10 +598,13 @@ class MainScreen(MDScreen):
                 if not full and first_run:
                     stop = True
                     break
+                if not full and first_run:
+                    stop = True
+                    break
             if stop:
                 break
         conn.logout()
-        self.log_line(f"Готово. Новых расчеток: {new}")
+        self.log_line(f"Готово. Обработано расчеток: {done}")
 
 
 class DetailScreen(MDScreen):
@@ -655,13 +670,93 @@ class DetailScreen(MDScreen):
         self.box.add_widget(summ)
         codes = Card()
         codes.add_widget(left_label("[b]Начисления и удержания[/b]", TEXT, "15sp"))
+                # заголовок колонок
+        header = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(4))
+        header.add_widget(Label(text="", size_hint_x=None, width=dp(50)))
+        header.add_widget(Label(text="", size_hint_x=1))
+        header.add_widget(Label(
+            text="[size=11sp]часы[/size]",
+            markup=True,
+            color=DIM,
+            size_hint_x=None,
+            width=dp(60),
+            halign="right",
+            valign="middle",
+        ))
+        header.add_widget(Label(
+            text="[size=11sp]сумма[/size]",
+            markup=True,
+            color=DIM,
+            size_hint_x=None,
+            width=dp(110),
+            halign="right",
+            valign="middle",
+        ))
+        for lbl in header.children:
+            lbl.bind(size=lbl.setter("text_size"))
+        codes.add_widget(header)
+
         for kind, code, name, s, h in d.get("codes", []):
             col = GREEN if kind == "accrual" else RED
             mark = "+" if kind == "accrual" else "−"
-            hours = f"  ({h} ч/дн)" if h else ""
-            codes.add_widget(
-                left_label(f"{mark} {code} {name}: [b]{s:,.2f}[/b]{hours}", col)
+            row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(4))
+            
+            # колонка 1: mark + code
+            lbl1 = Label(
+                text=f"{mark}{code}",
+                color=col,
+                font_size="13sp",
+                size_hint_x=None,
+                width=dp(50),
+                halign="left",
+                valign="middle",
             )
+            lbl1.bind(size=lbl1.setter("text_size"))
+            
+            # колонка 2: name (обрезается с …)
+            lbl2 = Label(
+                text=name,
+                color=col,
+                font_size="13sp",
+                size_hint_x=1,
+                halign="left",
+                valign="middle",
+                shorten=True,
+                shorten_from="right",
+            )
+            lbl2.bind(size=lbl2.setter("text_size"))
+            
+            # колонка 3: hours
+            hours_text = f"{h:.1f}" if h else ""
+            lbl3 = Label(
+                text=hours_text,
+                color=col,
+                font_size="13sp",
+                size_hint_x=None,
+                width=dp(60),
+                halign="right",
+                valign="middle",
+            )
+            lbl3.bind(size=lbl3.setter("text_size"))
+            
+            # колонка 4: sum
+            lbl4 = Label(
+                text=f"{s:,.2f}",
+                color=col,
+                font_size="13sp",
+                bold=True,
+                size_hint_x=None,
+                width=dp(110),
+                halign="right",
+                valign="middle",
+            )
+            lbl4.bind(size=lbl4.setter("text_size"))
+            
+            row.add_widget(lbl1)
+            row.add_widget(lbl2)
+            row.add_widget(lbl3)
+            row.add_widget(lbl4)
+            codes.add_widget(row)
         self.box.add_widget(codes)
 
 
@@ -1030,7 +1125,7 @@ class AboutScreen(MDScreen):
         except Exception as e:
             self._status(f"Ошибка обновления: {e}")
         finally:
-            k.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
+                       Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
 
     def _apply_update(self, staging):
         app_dir = os.path.dirname(sys.executable)

@@ -54,19 +54,28 @@ def exists(db, email_addr, filename):
 
 
 def save(db, email_addr, filename, data):
-    old = db.execute("SELECT id FROM payslips WHERE email=? AND filename=?",
-                     (email_addr, filename)).fetchone()
-    if old:
-        db.execute("DELETE FROM payslip_codes WHERE payslip_id=?", (old[0],))
-        db.execute("DELETE FROM payslips WHERE id=?", (old[0],))
-    pid = db.execute("""INSERT INTO payslips
+    # апсёрт основной записи: INSERT или UPDATE на месте, id не меняется
+    db.execute("""INSERT INTO payslips
         (email, filename, period, hours, oklad, accrued, deducted, paid,
          avg_sick, avg_work, avg_vacation)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(email, filename) DO UPDATE SET
+          period=excluded.period, hours=excluded.hours, oklad=excluded.oklad,
+          accrued=excluded.accrued, deducted=excluded.deducted, paid=excluded.paid,
+          avg_sick=excluded.avg_sick, avg_work=excluded.avg_work,
+          avg_vacation=excluded.avg_vacation, parsed_at=CURRENT_TIMESTAMP""",
         (email_addr, filename, data.get('period'), data.get('hours'),
          data.get('oklad'), data.get('accrued'), data.get('deducted'),
          data.get('paid'), data.get('avg_sick'), data.get('avg_work'),
-         data.get('avg_vacation'))).lastrowid
+         data.get('avg_vacation')))
+    
+    # получаем id (работает и при INSERT и при UPDATE)
+    pid = db.execute("SELECT id FROM payslips WHERE email=? AND filename=?",
+                     (email_addr, filename)).fetchone()[0]
+    
+    # коды всегда пересоздаём — их структура может отличаться от старой
+    db.execute("DELETE FROM payslip_codes WHERE payslip_id=?", (pid,))
+    
     names = data.get('code_names', {})
     for kind, table in (('accrual', data.get('accruals', {})),
                         ('deduction', data.get('deductions', {}))):
@@ -78,15 +87,17 @@ def save(db, email_addr, filename, data):
                  names.get(code) or pdf_parser.CODE_NAMES.get(code)
                  or f'Код {code}',
                  v['sum'], v['hours']))
-        # приоритет электронной расчетки: справочник нового PDF
-    # переписывает ячейки имен во всех расчетках, где имя отличается
+    
+    # приоритет электронной расчетки: имена кодов из PDF переписывают старые
     for code, nm in names.items():
         if nm:
             db.execute(
                 "UPDATE payslip_codes SET name=? WHERE code=? AND name<>?",
                 (nm, code, nm))
-        if data.get('profile'):
-            save_profile(db, email_addr, data['profile'])   
+    
+    if data.get('profile'):
+        save_profile(db, email_addr, data['profile'])
+    
     db.commit()
 
 
