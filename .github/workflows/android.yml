@@ -3,49 +3,52 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          git zip unzip \
-          openjdk-17-jdk \
-          autoconf libtool pkg-config \
-          zlib1g-dev libncurses5-dev \
-          libncursesw5-dev libtinfo5 \
-          cmake libffi-dev libssl-dev \
-          python3-pip python3-dev
-    
-    - name: Install Python 3.11 via deadsnakes
-      run: |
-        sudo apt-get install -y software-properties-common
-        sudo add-apt-repository ppa:deadsnakes/ppa -y
-        sudo apt-get update
-        sudo apt-get install -y python3.11 python3.11-dev python3.11-venv python3.11-distutils
-        
-        # Создаем симлинк для python3.11 как python3.11
-        # НЕ заменяем системный python3!
-    
-    - name: Install Buildozer with Python 3.11
-      run: |
-        python3.11 -m pip install --upgrade pip
-        python3.11 -m pip install buildozer cython
-    
-    - name: Build APK
-      run: |
-        # Используем Python 3.11 явно
-        python3.11 -m buildozer android debug
-    
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-debug
-        path: bin/*.apk
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip \
+            build-essential \
+            openjdk-17-jdk \
+            autoconf automake libtool libtool-bin libltdl-dev \
+            pkg-config cmake \
+            zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libffi-dev libssl-dev
+
+      - name: Install Buildozer
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install buildozer cython
+
+      - name: Build APK
+        run: |
+          buildozer android debug
+        env:
+          JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: bin/*.apk
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: bin/*.apk
