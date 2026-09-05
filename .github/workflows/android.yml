@@ -35,12 +35,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer cython
 
-      - name: Pre-download freetype from GitHub mirror
+      - name: Pre-download freetype from mirror
         run: |
           mkdir -p .buildozer/android/platform/build-arm64-v8a/packages/freetype
-          curl -fL --retry 5 --retry-delay 5 -o .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz https://github.com/freetype/freetype/releases/download/VER-2-14-1/freetype-2.14.1.tar.gz
-          touch .buildozer/android/platform/build-arm64-v8a/packages/freetype/.mark-freetype-2.14.1.tar.gz
-
+          curl -fL --retry 3 --retry-delay 5 -o .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz https://downloads.sourceforge.net/project/freetype/freetype2/2.14.1/freetype-2.14.1.tar.gz || curl -fL --retry 3 --retry-delay 5 -o .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.gz || true
+          if [ -s .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz ]; then
+            touch .buildozer/android/platform/build-arm64-v8a/packages/freetype/.mark-freetype-2.14.1.tar.gz
+            ls -la .buildozer/android/platform/build-arm64-v8a/packages/freetype/
+          fi
       - name: Build APK
         run: |
           buildozer android debug
