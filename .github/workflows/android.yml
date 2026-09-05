@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, android-test ]
     tags: [ 'v*' ]
   workflow_dispatch:
 
@@ -35,14 +35,23 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer cython
 
-      - name: Pre-download freetype from mirror
+      - name: Pre-download freetype from mirrors
         run: |
-          mkdir -p .buildozer/android/platform/build-arm64-v8a/packages/freetype
-          curl -fL --retry 3 --retry-delay 5 -o .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz https://downloads.sourceforge.net/project/freetype/freetype2/2.14.1/freetype-2.14.1.tar.gz || curl -fL --retry 3 --retry-delay 5 -o .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.gz || true
-          if [ -s .buildozer/android/platform/build-arm64-v8a/packages/freetype/freetype-2.14.1.tar.gz ]; then
-            touch .buildozer/android/platform/build-arm64-v8a/packages/freetype/.mark-freetype-2.14.1.tar.gz
-            ls -la .buildozer/android/platform/build-arm64-v8a/packages/freetype/
+          D=.buildozer/android/platform/build-arm64-v8a/packages/freetype
+          mkdir -p "$D"
+          curl -fL --retry 3 --retry-delay 5 -o "$D/freetype-2.14.1.tar.gz" "https://downloads.sourceforge.net/project/freetype/freetype2/2.14.1/freetype-2.14.1.tar.gz" \
+            || curl -fL --retry 3 --retry-delay 5 -o "$D/freetype-2.14.1.tar.gz" "https://ftp.osuosl.org/pub/blfs/conglomeration/freetype/freetype-2.14.1.tar.gz" \
+            || curl -fL --retry 3 --retry-delay 5 -o "$D/freetype-2.14.1.tar.gz" "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.gz"
+          
+          if [ -s "$D/freetype-2.14.1.tar.gz" ]; then
+            touch "$D/.mark-freetype-2.14.1.tar.gz"
+            echo "✅ Freetype successfully downloaded!"
+            ls -la "$D"
+          else
+            echo "❌ ERROR: freetype download failed from all mirrors"
+            exit 1
           fi
+
       - name: Build APK
         run: |
           buildozer android debug
