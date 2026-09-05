@@ -22,7 +22,6 @@ android.ndk = 25b
 android.accept_sdk_license = True
 android.archs = arm64-v8a
 
-p4a.branch = develop
 
 [buildozer]
 
