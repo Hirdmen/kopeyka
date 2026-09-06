@@ -664,18 +664,26 @@ class DetailScreen(MDScreen):
         self.box.clear_widgets()
         if not d:
             return
+        # Отработано — только из кода 006 (начисление).
+        # Нет строки 006 (весь месяц больничный и т.п.) — 0.
+        worked = 0.0
+        for kind, code, name, s, h in d.get("codes", []):
+            if kind == "accrual" and str(code).strip() in ("006", "6"):
+                worked = h or 0.0
+                break
         summ = Card()
         summ.add_widget(
             left_label(f'[b]{d.get("period") or d["filename"]}[/b]', TEXT, "16sp")
         )
         rows = [
-            ("Отработано (часы)", d.get("hours"), TEXT),
+            ("Отработано (часы)", worked, TEXT),
             ("Оклад", d.get("oklad"), TEXT),
             ("Начислено", d.get("accrued"), GREEN),
             ("Удержано", d.get("deducted"), RED),
             ("Сред. больничные", d.get("avg_sick"), DIM),
             ("Сред. р/час", d.get("avg_work"), DIM),
             ("Сред. р/день (отпуск)", d.get("avg_vacation"), DIM),
+            ("Индив. фонд времени", d.get("hours"), DIM),
         ]
         for name, val, col in rows:
             g = GridLayout(cols=2, size_hint_y=None, height=dp(34))
