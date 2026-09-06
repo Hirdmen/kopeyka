@@ -51,7 +51,11 @@ jobs:
             echo "❌ ERROR: freetype download failed from all mirrors"
             exit 1
           fi
-
+      - name: Restore signing keystore
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
+          ls -la ~/.android
       - name: Build APK
         run: |
           buildozer android debug
