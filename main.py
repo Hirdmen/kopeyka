@@ -49,10 +49,32 @@ from kivymd.uix.textfield import MDTextField
 import pdf_parser
 import storage
 
-# На Android нет системных CA-сертификатов — указываем Python на certifi
+# На Android нет системных CA-сертификатов — чиним HTTPS вручную
+import ssl
 import certifi
-os.environ["SSL_CERT_FILE"] = certifi.where()
-os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+
+_CA_FILE = certifi.where()
+_CA_DIR = "/system/etc/security/cacerts"
+print("[kopeyka] certifi:", _CA_FILE, "exists:", os.path.exists(_CA_FILE))
+os.environ["SSL_CERT_FILE"] = _CA_FILE
+os.environ["REQUESTS_CA_BUNDLE"] = _CA_FILE
+os.environ["SSL_CERT_DIR"] = _CA_DIR
+
+def _make_ssl_ctx(*args, **kwargs):
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        ctx.load_verify_locations(
+            cafile=_CA_FILE if os.path.exists(_CA_FILE) else None,
+            capath=_CA_DIR if os.path.isdir(_CA_DIR) else None,
+        )
+    except Exception as e:
+        print("[kopeyka] load_verify_locations failed:", e)
+        ctx.set_default_verify_paths()
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    return ctx
+
+ssl._create_default_https_context = _make_ssl_ctx
 
 try:
     from kivymd.uix.behaviors import RippleBehavior
