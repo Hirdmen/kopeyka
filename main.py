@@ -6,8 +6,10 @@ buildozer: requirements = python3,kivy,kivymd,pypdf | INTERNET
 """
 
 from kivy.config import Config
+from kivy.utils import platform as _platform
 
-Config.set("input", "mouse", "mouse,disable_multitouch")
+if _platform != "android":
+    Config.set("input", "mouse", "mouse,disable_multitouch")
 Config.set("graphics", "vsync", 1)
 Config.set("graphics", "maxfps", 60)
 
@@ -47,6 +49,33 @@ from kivymd.uix.textfield import MDTextField
 import pdf_parser
 import storage
 
+# На Android нет системных CA-сертификатов — чиним HTTPS вручную
+import ssl
+import certifi
+
+_CA_FILE = certifi.where()
+_CA_DIR = "/system/etc/security/cacerts"
+print("[kopeyka] certifi:", _CA_FILE, "exists:", os.path.exists(_CA_FILE))
+os.environ["SSL_CERT_FILE"] = _CA_FILE
+os.environ["REQUESTS_CA_BUNDLE"] = _CA_FILE
+os.environ["SSL_CERT_DIR"] = _CA_DIR
+
+def _make_ssl_ctx(*args, **kwargs):
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    try:
+        ctx.load_verify_locations(
+            cafile=_CA_FILE if os.path.exists(_CA_FILE) else None,
+            capath=_CA_DIR if os.path.isdir(_CA_DIR) else None,
+        )
+    except Exception as e:
+        print("[kopeyka] load_verify_locations failed:", e)
+        ctx.set_default_verify_paths()
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    return ctx
+
+ssl._create_default_https_context = _make_ssl_ctx
+
 try:
     from kivymd.uix.behaviors import RippleBehavior
 
@@ -58,13 +87,19 @@ except ImportError:
     pass
 
 import sys
-if getattr(sys, 'frozen', False):
+
+if getattr(sys, "frozen", False):
     # PyInstaller режим: файлы в sys._MEIPASS
     APP_DIR = sys._MEIPASS
 else:
     # Режим разработки
     APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Расчетки")
+if _platform == "android":
+    from android.storage import app_storage_path
+
+    DATA_DIR = os.path.join(app_storage_path(), "Расчетки")
+else:
+    DATA_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Расчетки")
 os.makedirs(DATA_DIR, exist_ok=True)
 PDF_DIR = DATA_DIR
 PAYSLIP_PREFIX = "rasch_list"
@@ -176,8 +211,12 @@ def _ver_tuple(s):
 def github_latest_release():
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
     req = urllib.request.Request(
-        url, headers={"User-Agent": "Kopeyka/" + APP_VERSION,
-                      "Accept": "application/vnd.github+json"})
+        url,
+        headers={
+            "User-Agent": "Kopeyka/" + APP_VERSION,
+            "Accept": "application/vnd.github+json",
+        },
+    )
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.load(r)
 
@@ -368,9 +407,11 @@ def password_row(initial="", hint="Пароль"):
     row.add_widget(eye)
     return row, field
 
+
 def decrypt_pdf_bytes(data, password):
     import io
     from pypdf import PdfReader, PdfWriter
+
     r = PdfReader(io.BytesIO(data))
     if not r.is_encrypted:
         return data
@@ -380,6 +421,7 @@ def decrypt_pdf_bytes(data, password):
     buf = io.BytesIO()
     w.write(buf)
     return buf.getvalue()
+
 
 class MainScreen(MDScreen):
     def __init__(self, **kwargs):
@@ -644,18 +686,26 @@ class DetailScreen(MDScreen):
         self.box.clear_widgets()
         if not d:
             return
+        # Отработано — только из кода 006 (начисление).
+        # Нет строки 006 (весь месяц больничный и т.п.) — 0.
+        worked = 0.0
+        for kind, code, name, s, h in d.get("codes", []):
+            if kind == "accrual" and str(code).strip() in ("006", "6"):
+                worked = h or 0.0
+                break
         summ = Card()
         summ.add_widget(
             left_label(f'[b]{d.get("period") or d["filename"]}[/b]', TEXT, "16sp")
         )
         rows = [
-            ("Отработано (часы)", d.get("hours"), TEXT),
+            ("Отработано (часы)", worked, TEXT),
             ("Оклад", d.get("oklad"), TEXT),
             ("Начислено", d.get("accrued"), GREEN),
             ("Удержано", d.get("deducted"), RED),
             ("Сред. больничные", d.get("avg_sick"), DIM),
             ("Сред. р/час", d.get("avg_work"), DIM),
             ("Сред. р/день (отпуск)", d.get("avg_vacation"), DIM),
+            ("Индив. фонд времени", d.get("hours"), DIM),
         ]
         for name, val, col in rows:
             g = GridLayout(cols=2, size_hint_y=None, height=dp(34))
@@ -685,28 +735,32 @@ class DetailScreen(MDScreen):
         self.box.add_widget(summ)
         codes = Card()
         codes.add_widget(left_label("[b]Начисления и удержания[/b]", TEXT, "15sp"))
-                # заголовок колонок
+        # заголовок колонок
         header = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(4))
         header.add_widget(Label(text="", size_hint_x=None, width=dp(50)))
         header.add_widget(Label(text="", size_hint_x=1))
-        header.add_widget(Label(
-            text="[size=11sp]часы[/size]",
-            markup=True,
-            color=DIM,
-            size_hint_x=None,
-            width=dp(60),
-            halign="right",
-            valign="middle",
-        ))
-        header.add_widget(Label(
-            text="[size=11sp]сумма[/size]",
-            markup=True,
-            color=DIM,
-            size_hint_x=None,
-            width=dp(110),
-            halign="right",
-            valign="middle",
-        ))
+        header.add_widget(
+            Label(
+                text="[size=11sp]часы[/size]",
+                markup=True,
+                color=DIM,
+                size_hint_x=None,
+                width=dp(60),
+                halign="right",
+                valign="middle",
+            )
+        )
+        header.add_widget(
+            Label(
+                text="[size=11sp]сумма[/size]",
+                markup=True,
+                color=DIM,
+                size_hint_x=None,
+                width=dp(110),
+                halign="right",
+                valign="middle",
+            )
+        )
         for lbl in header.children:
             lbl.bind(size=lbl.setter("text_size"))
         codes.add_widget(header)
@@ -715,7 +769,7 @@ class DetailScreen(MDScreen):
             col = GREEN if kind == "accrual" else RED
             mark = "+" if kind == "accrual" else "−"
             row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(4))
-            
+
             # колонка 1: mark + code
             lbl1 = Label(
                 text=f"{mark}{code}",
@@ -727,7 +781,7 @@ class DetailScreen(MDScreen):
                 valign="middle",
             )
             lbl1.bind(size=lbl1.setter("text_size"))
-            
+
             # колонка 2: name (обрезается с …)
             lbl2 = Label(
                 text=name,
@@ -740,7 +794,7 @@ class DetailScreen(MDScreen):
                 shorten_from="right",
             )
             lbl2.bind(size=lbl2.setter("text_size"))
-            
+
             # колонка 3: hours
             hours_text = f"{h:.1f}" if h else ""
             lbl3 = Label(
@@ -753,7 +807,7 @@ class DetailScreen(MDScreen):
                 valign="middle",
             )
             lbl3.bind(size=lbl3.setter("text_size"))
-            
+
             # колонка 4: sum
             lbl4 = Label(
                 text=f"{s:,.2f}",
@@ -766,7 +820,7 @@ class DetailScreen(MDScreen):
                 valign="middle",
             )
             lbl4.bind(size=lbl4.setter("text_size"))
-            
+
             row.add_widget(lbl1)
             row.add_widget(lbl2)
             row.add_widget(lbl3)
@@ -901,8 +955,8 @@ class CodesScreen(MDScreen):
         root.add_widget(TopBar("Справочник кодов АВТОВАЗ", back_cb=self.back))
         srow = BoxLayout(size_hint_y=None, height=dp(62), spacing=dp(6))
         self.search_field = MDTextField(
-            hint_text="Код или название: 813, премия…",
-            size_hint_y=None, height=dp(62))
+            hint_text="Код или название: 813, премия…", size_hint_y=None, height=dp(62)
+        )
         self.search_field.bind(on_text_validate=self.do_search)
         find_btn = AccentButton(text="Найти", size_hint_x=None, width=dp(90))
         find_btn.bind(on_release=self.do_search)
@@ -931,7 +985,8 @@ class CodesScreen(MDScreen):
         # Назад №2: список уже полный — уходим в Меню
         self.manager.current = "main"
         Clock.schedule_once(
-            lambda dt: self.manager.get_screen("main").open_menu(), 0.15)
+            lambda dt: self.manager.get_screen("main").open_menu(), 0.15
+        )
 
     def on_enter(self):
         app = MDApp.get_running_app()
@@ -940,9 +995,12 @@ class CodesScreen(MDScreen):
                    WHERE id IN (SELECT MAX(id) FROM payslip_codes
                                 GROUP BY code)"""):
             self.names[code] = name
-        self.usage = dict(app.db.execute(
-            "SELECT code, COUNT(DISTINCT payslip_id) "
-            "FROM payslip_codes GROUP BY code"))
+        self.usage = dict(
+            app.db.execute(
+                "SELECT code, COUNT(DISTINCT payslip_id) "
+                "FROM payslip_codes GROUP BY code"
+            )
+        )
         self._last_q = self.search_field.text
         self._render(self.search_field.text)
 
@@ -957,11 +1015,16 @@ class CodesScreen(MDScreen):
             return
         for code, name in items:
             hexcol = "FF6B66" if int(code) >= 400 else "66BB6A"
-            cnt = f"  [color=9AA5B5]×{self.usage[code]}[/color]" \
-                if code in self.usage else ""
+            cnt = (
+                f"  [color=9AA5B5]×{self.usage[code]}[/color]"
+                if code in self.usage
+                else ""
+            )
             row = CardButton(
                 text=f"[b][color={hexcol}]{code}[/color][/b]  {name}{cnt}",
-                size_hint_y=None, height=dp(44))
+                size_hint_y=None,
+                height=dp(44),
+            )
             row.bind(on_release=lambda *a, c=code: self.show_code(c))
             self.box.add_widget(row)
 
@@ -975,10 +1038,13 @@ class CodesScreen(MDScreen):
             if q in self.names:
                 self.show_code(q)
             else:
-                Popup(title=f"Код {q}",
-                      content=left_label(
-                          "Код не найден в справочнике и в расчетках.", DIM),
-                      size_hint=(0.85, 0.3)).open()
+                Popup(
+                    title=f"Код {q}",
+                    content=left_label(
+                        "Код не найден в справочнике и в расчетках.", DIM
+                    ),
+                    size_hint=(0.85, 0.3),
+                ).open()
         else:
             self._render(q)
 
@@ -987,16 +1053,33 @@ class CodesScreen(MDScreen):
         ded = int(code) >= 400
         n = self.usage.get(code)
         box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
-        box.add_widget(left_label(
-            f"[b][color={'FF6B66' if ded else '66BB6A'}]{code}[/color][/b]",
-            TEXT, "24sp"))
+        box.add_widget(
+            left_label(
+                f"[b][color={'FF6B66' if ded else '66BB6A'}]{code}[/color][/b]",
+                TEXT,
+                "24sp",
+            )
+        )
         box.add_widget(left_label(name, TEXT, "15sp"))
-        box.add_widget(left_label(
-            f"[color={'FF6B66' if ded else '66BB6A'}]"
-            f"{'УДЕРЖАНИЕ' if ded else 'НАЧИСЛЕНИЕ'}[/color]", TEXT, "13sp"))
-        box.add_widget(left_label(
-            f"Встречался в расчетках: {n}" if n
-            else "В расчетках еще не встречался", DIM, "13sp"))
+        box.add_widget(
+            left_label(
+                f"[color={'FF6B66' if ded else '66BB6A'}]"
+                f"{'УДЕРЖАНИЕ' if ded else 'НАЧИСЛЕНИЕ'}[/color]",
+                TEXT,
+                "13sp",
+            )
+        )
+        box.add_widget(
+            left_label(
+                (
+                    f"Встречался в расчетках: {n}"
+                    if n
+                    else "В расчетках еще не встречался"
+                ),
+                DIM,
+                "13sp",
+            )
+        )
         Popup(title=f"Код {code}", content=box, size_hint=(0.85, 0.4)).open()
 
 
@@ -1141,7 +1224,7 @@ class AboutScreen(MDScreen):
         except Exception as e:
             self._status(f"Ошибка обновления: {e}")
         finally:
-                       Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
+            Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
 
     def _apply_update(self, staging):
         app_dir = os.path.dirname(sys.executable)
