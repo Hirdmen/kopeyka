@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-main.py v2.2 — «Расчетки» (Android/ПК). KivyMD 2.0 compatible.
+main.py — «Расчетки» (Android/ПК). KivyMD 2.0 compatible.
 Рядом: pdf_parser.py, storage.py.
 buildozer: requirements = python3,kivy,kivymd,pypdf | INTERNET
 """
@@ -12,6 +12,7 @@ if _platform != "android":
     Config.set("input", "mouse", "mouse,disable_multitouch")
 Config.set("graphics", "vsync", 1)
 Config.set("graphics", "maxfps", 60)
+Config.set('graphics', 'multisamples', '0')
 
 import os
 import re
@@ -106,7 +107,7 @@ PAYSLIP_PREFIX = "rasch_list"
 CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
 APP_NAME = "Расчетки"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 GITHUB_REPO = "Hirdmen/kopeyka"
 DEV_NAME = "Hirdmen"
 DEV_EMAIL = "hird78lvl@yandex.ru"
