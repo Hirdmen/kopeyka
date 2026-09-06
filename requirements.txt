@@ -1,0 +1,9 @@
+kivy==2.3.1
+kivymd==2.0.0
+pillow
+asynckivy
+asyncgui
+materialshapes
+materialyoucolor==3.0.3
+pypdf
+requests
