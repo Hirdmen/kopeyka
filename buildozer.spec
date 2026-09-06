@@ -10,7 +10,7 @@ source.exclude_patterns = *.pyc,__pycache__,build,dist,.git,.github,*.spec
 
 version = 1.0.2
 
-requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.1,kivymd==2.0.0,pillow,asynckivy,asyncgui,materialshapes,materialyoucolor==3.0.3,pypdf,requests
+requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.1,kivymd==2.0.0,pillow,asynckivy,asyncgui,materialshapes,materialyoucolor==3.0.3,pypdf,requests,certifi
 orientation = portrait
 fullscreen = 0
 

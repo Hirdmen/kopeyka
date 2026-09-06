@@ -49,6 +49,11 @@ from kivymd.uix.textfield import MDTextField
 import pdf_parser
 import storage
 
+# На Android нет системных CA-сертификатов — указываем Python на certifi
+import certifi
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+
 try:
     from kivymd.uix.behaviors import RippleBehavior
 
