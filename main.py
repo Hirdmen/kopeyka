@@ -381,7 +381,7 @@ def left_label(text, color=TEXT, size="14sp"):
         text=text,
         color=color,
         font_size=size,
-        markup=True,  # ← вот этой строки не хватает
+        markup=True,  
         halign="left",
         valign="middle",
         size_hint_y=None,
@@ -390,6 +390,107 @@ def left_label(text, color=TEXT, size="14sp"):
     lab.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
     return lab
 
+from kivy.uix.behaviors import ButtonBehavior
+
+
+class TapRow(ButtonBehavior, BoxLayout):
+    """Строка списка, реагирующая на нажатие."""
+
+
+HELP_TEXT = """КАК НАСТРОИТЬ ПРИЛОЖЕНИЕ (пошагово)
+
+Приложение читает расчетки из вашей почты. Чтобы войти, нужен
+специальный «пароль приложения» — НЕ тот, которым вы входите в почту.
+Он создаётся один раз и показывается только один раз.
+
+── ЯНДЕКС ──
+Шаг 1. Разрешить доступ по IMAP:
+  Почта на компьютере → шестерёнка «Настройки» → «Все настройки» →
+  «Почтовые программы» → галка «С сервера imap.yandex.ru по протоколу
+  IMAP» → сохранить.
+Шаг 2. Создать пароль приложения:
+  Открыть https://id.yandex.ru/security → вкладка «Безопасность» →
+  раздел «Доступ к вашим данным» → «Пароли приложений» →
+  тип «Почтовый клиент» → название (например, «Копейка») → «Далее».
+Шаг 3. Яндекс покажет пароль из 16 символов. СРАЗУ скопируйте его
+  И сделайте скриншот окна с паролем: закроете окно — пароль больше
+  никогда не показать, только создавать новый.
+  Пароль активируется через 2–3 часа: если приложение не входит
+  сразу — подождите и повторите.
+Шаг 4. В приложении: укажите почту и вставьте этот пароль → сохранить.
+Если что-то непонятно — справка Яндекса с картинками:
+https://yandex.ru/support/id/ru/authorization/app-passwords
+
+── GOOGLE (GMAIL) ──
+Шаг 1. Включить двухэтапную аутентификацию (без неё пароли приложений
+  не создаются): myaccount.google.com/security → «Двухэтапная
+  аутентификация» → включить.
+Шаг 2. Разрешить IMAP: Gmail на компьютере → шестерёнка → «Все настройки»
+  → вкладка «Пересылка и POP/IMAP» → «Включить IMAP» → сохранить.
+Шаг 3. Создать пароль приложения: https://myaccount.google.com/apppasswords
+  → название любое (например, «Копейка») → «Создать» → покажется
+  16 символов: СРАЗУ скопируйте и сделайте скриншот (показывается
+  один раз).
+Шаг 4. В приложении: укажите почту и вставьте этот пароль → сохранить.
+
+── ПАПКА «РАСЧЕТКИ» И ПРАВИЛО (ускоряет поиск) ──
+Расчетки АВТОВАЗа всегда приходят с одного адреса:
+persmaster@vaz.ru — его и указываем в фильтре «От кого».
+Яндекс: слева в почте «Создать папку» → имя «Расчетки».
+  Затем Настройки → Все настройки → Фильтры → Создать фильтр:
+  «От» — persmaster@vaz.ru → действие «Перемещать в папку Расчетки» →
+  галка «Применить к существующим письмам» (старые расчетки переедут
+  сами) → создать.
+Google: слева «Ещё» → «Создать ярлык» → «Расчетки».
+  Затем в строке поиска значок «Параметры поиска» → поле «От»:
+  persmaster@vaz.ru → «Создать фильтр» → галки «Применять ярлык:
+  Расчетки» и «Применить фильтр к соответствующим письмам» → создать.
+Не поставили галку — не страшно: выделите старые расчетки в почте
+и перенесите в папку «Расчетки» руками.
+Эту папку укажите в настройках программы (поле «Папка для расчеток»).
+Если не создавать папку и не указать её в настройках — поиск будет
+осуществляться по всем входящим письмам, что существенно дольше."""
+
+
+def show_code_card(code, name, s, h):
+    """Плитка-карточка кода: полное имя, сумма, часы (если есть)."""
+    hexcol = "FF6B66" if int(str(code).rstrip("П")) >= 400 else "66BB6A"
+    box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(12),
+                    size_hint_y=None)
+    box.bind(minimum_height=box.setter("height"))
+    box.add_widget(left_label(
+        f"[b][size=22sp][color={hexcol}]{code}[/color][/size][/b]", TEXT, "22sp"))
+    nl = Label(text=name, color=TEXT, font_size="16sp",
+               halign="left", valign="top", size_hint_y=None)
+    nl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+    nl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
+    box.add_widget(nl)
+    if h:
+        line = (f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
+                f"     Часы: [b][color={hexcol}]{h:.1f}[/color][/b]")
+    else:
+        line = f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
+    box.add_widget(left_label(line, TEXT, "16sp"))
+    sv = ScrollView(do_scroll_y=True)
+    sv.add_widget(box)
+    Popup(title="Код начисления/удержания", content=sv,
+          size_hint=(0.85, 0.45)).open()
+def _clamp_two_lines(lbl, full_text, max_px):
+    """Вписать текст в max_px высоты (≈2 строки); не влезает — обрезать с '…'."""
+    lbl.text = full_text
+    lbl.texture_update()
+    if lbl.texture_size[1] <= max_px:
+        return
+    lo, hi = 0, len(full_text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        lbl.text = full_text[:mid] + '…'
+        lbl.texture_update()
+        if lbl.texture_size[1] <= max_px:
+            lo = mid
+        else:
+            hi = mid - 1
+    lbl.text = full_text[:lo] + '…'
 
 def password_row(initial="", hint="Пароль"):
     """Поле пароля + кнопка видимости (abc / •••)."""
@@ -546,9 +647,10 @@ class MainScreen(MDScreen):
     def open_menu(self, *a):
         box = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
         box.bind(minimum_height=box.setter("height"))
-        popup = Popup(title="Меню", content=box, size_hint=(0.9, 0.55))
+        popup = Popup(title="Меню", content=box, size_hint=(0.9, 0.6))
         for txt, cb in (
             ("Настройки почты", lambda: self.go("settings")),
+            ("Инструкция по настройке", self.open_help),
             ("Справочник кодов АВТОВАЗ", lambda: self.go("codes")),
             ("О программе", lambda: self.go("about")),
             ("Переразобрать PDF", self.reparse_pdfs),
@@ -557,6 +659,20 @@ class MainScreen(MDScreen):
             b.bind(on_release=lambda *a, c=cb: (c(), popup.dismiss()))
             box.add_widget(b)
         popup.open()
+
+    def open_help(self, *a):
+        box = BoxLayout(orientation="vertical", spacing=dp(4), padding=dp(12),
+                        size_hint_y=None)
+        box.bind(minimum_height=box.setter("height"))
+        lbl = Label(text=HELP_TEXT, color=TEXT, font_size="15sp",
+                    halign="left", valign="top", size_hint_y=None)
+        lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        lbl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
+        box.add_widget(lbl)
+        sv = ScrollView(do_scroll_y=True)
+        sv.add_widget(box)
+        Popup(title="Инструкция по настройке", content=sv,
+              size_hint=(0.95, 0.9)).open()
 
     def go(self, name):
         self.manager.current = name
@@ -687,8 +803,8 @@ class DetailScreen(MDScreen):
         self.box.clear_widgets()
         if not d:
             return
-        # Отработано — только из кода 006 (начисление).
-        # Нет строки 006 (весь месяц больничный и т.п.) — 0.
+        # Отработано — только код 006 (начисление).
+        # Часы 006П — это другой месяц, они видны отдельной строкой ниже.
         worked = 0.0
         for kind, code, name, s, h in d.get("codes", []):
             if kind == "accrual" and str(code).strip() in ("006", "6"):
@@ -735,14 +851,13 @@ class DetailScreen(MDScreen):
         summ.add_widget(g)
         self.box.add_widget(summ)
         codes = Card()
-        codes.add_widget(left_label("[b]Начисления и удержания[/b]", TEXT, "15sp"))
-        # заголовок колонок
-        header = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(4))
-        header.add_widget(Label(text="", size_hint_x=None, width=dp(50)))
+        codes.add_widget(left_label("[b]Начисления и удержания[/b]", TEXT, "16sp"))
+        header = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(4))
+        header.add_widget(Label(text="", size_hint_x=None, width=dp(56)))
         header.add_widget(Label(text="", size_hint_x=1))
         header.add_widget(
             Label(
-                text="[size=11sp]часы[/size]",
+                text="[size=12sp]часы[/size]",
                 markup=True,
                 color=DIM,
                 size_hint_x=None,
@@ -753,7 +868,7 @@ class DetailScreen(MDScreen):
         )
         header.add_widget(
             Label(
-                text="[size=11sp]сумма[/size]",
+                text="[size=12sp]сумма[/size]",
                 markup=True,
                 color=DIM,
                 size_hint_x=None,
@@ -769,39 +884,43 @@ class DetailScreen(MDScreen):
         for kind, code, name, s, h in d.get("codes", []):
             col = GREEN if kind == "accrual" else RED
             mark = "+" if kind == "accrual" else "−"
-            row = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(4))
+            row = TapRow(size_hint_y=None, height=dp(52), spacing=dp(4))
 
-            # колонка 1: mark + code
             lbl1 = Label(
                 text=f"{mark}{code}",
                 color=col,
-                font_size="13sp",
+                font_size="15sp",
                 size_hint_x=None,
-                width=dp(50),
+                width=dp(56),
                 halign="left",
                 valign="middle",
             )
             lbl1.bind(size=lbl1.setter("text_size"))
 
-            # колонка 2: name (обрезается с …)
+            # название: перенос до 2 строк, длинное обрезается
+                       # название: максимум 2 строки, излишек — «…» справа
             lbl2 = Label(
                 text=name,
                 color=col,
-                font_size="13sp",
+                font_size="15sp",
                 size_hint_x=1,
                 halign="left",
                 valign="middle",
-                shorten=True,
-                shorten_from="right",
             )
-            lbl2.bind(size=lbl2.setter("text_size"))
 
-            # колонка 3: hours
+            def _refit(i, v, lbl=lbl2, full=name):
+                lbl.text_size = (v[0], None)
+                lbl.text = 'Проба'
+                lbl.texture_update()
+                one = lbl.texture_size[1]
+                _clamp_two_lines(lbl, full, one * 2 + dp(4))
+            lbl2.bind(size=_refit)
+
             hours_text = f"{h:.1f}" if h else ""
             lbl3 = Label(
                 text=hours_text,
                 color=col,
-                font_size="13sp",
+                font_size="15sp",
                 size_hint_x=None,
                 width=dp(60),
                 halign="right",
@@ -809,11 +928,10 @@ class DetailScreen(MDScreen):
             )
             lbl3.bind(size=lbl3.setter("text_size"))
 
-            # колонка 4: sum
             lbl4 = Label(
                 text=f"{s:,.2f}",
                 color=col,
-                font_size="13sp",
+                font_size="15sp",
                 bold=True,
                 size_hint_x=None,
                 width=dp(110),
@@ -826,6 +944,8 @@ class DetailScreen(MDScreen):
             row.add_widget(lbl2)
             row.add_widget(lbl3)
             row.add_widget(lbl4)
+            row.bind(on_release=lambda *a, c=code, n=name, ss=s, hh=h:
+                     show_code_card(c, n, ss, hh))
             codes.add_widget(row)
         self.box.add_widget(codes)
 
@@ -992,18 +1112,22 @@ class CodesScreen(MDScreen):
     def on_enter(self):
         app = MDApp.get_running_app()
         self.names = dict(pdf_parser.CODE_NAMES)
+        # свежие имена из базы: только базовые коды (без П-перерасчетов)
         for code, name in app.db.execute("""SELECT code, name FROM payslip_codes
                    WHERE id IN (SELECT MAX(id) FROM payslip_codes
+                                WHERE code NOT LIKE '%П'
                                 GROUP BY code)"""):
             self.names[code] = name
+        # частотность: П-коды схлопываются в базовый
         self.usage = dict(
             app.db.execute(
-                "SELECT code, COUNT(DISTINCT payslip_id) "
-                "FROM payslip_codes GROUP BY code"
+                "SELECT REPLACE(code, 'П', ''), COUNT(DISTINCT payslip_id) "
+                "FROM payslip_codes GROUP BY REPLACE(code, 'П', '')"
             )
         )
         self._last_q = self.search_field.text
         self._render(self.search_field.text)
+        
 
     def _render(self, q=""):
         self.box.clear_widgets()
@@ -1015,7 +1139,7 @@ class CodesScreen(MDScreen):
             self.box.add_widget(left_label(f"Код не найден: {q}", DIM))
             return
         for code, name in items:
-            hexcol = "FF6B66" if int(code) >= 400 else "66BB6A"
+            hexcol = "FF6B66" if int(str(code).rstrip("П")) >= 400 else "66BB6A"
             cnt = (
                 f"  [color=9AA5B5]×{self.usage[code]}[/color]"
                 if code in self.usage
@@ -1026,6 +1150,11 @@ class CodesScreen(MDScreen):
                 size_hint_y=None,
                 height=dp(44),
             )
+            row.halign = "left"
+            row.valign = "middle"
+            row.shorten = True
+            row.shorten_from = "right"
+            row.bind(size=lambda i, v: setattr(i, "text_size", (v[0] - dp(20), v[1])))
             row.bind(on_release=lambda *a, c=code: self.show_code(c))
             self.box.add_widget(row)
 
@@ -1050,9 +1179,13 @@ class CodesScreen(MDScreen):
             self._render(q)
 
     def show_code(self, code):
+        app = MDApp.get_running_app()
         name = self.names.get(code, f"Код {code}")
         ded = int(code) >= 400
-        n = self.usage.get(code)
+        # за всё время: П-перерасчеты считаем вместе с базовым кодом
+        n = app.db.execute(
+            "SELECT COUNT(DISTINCT payslip_id) FROM payslip_codes "
+            "WHERE code = ? OR code = ? || 'П'", (code, code)).fetchone()[0]
         box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
         box.add_widget(
             left_label(

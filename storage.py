@@ -84,8 +84,7 @@ def save(db, email_addr, filename, data):
                 (payslip_id, kind, code, name, sum, hours)
                 VALUES (?,?,?,?,?,?)""",
                 (pid, kind, code,
-                 names.get(code) or pdf_parser.CODE_NAMES.get(code)
-                 or f'Код {code}',
+                 pdf_parser.code_display_name(code, names),
                  v['sum'], v['hours']))
     
     # приоритет электронной расчетки: имена кодов из PDF переписывают старые
@@ -152,7 +151,7 @@ def get_profile(db, email_addr):
 def update_profile_manual(db, email_addr, fields):
     """Ручные поля карточки: hire_date, birthday, position_name."""
     db.execute("INSERT OR IGNORE INTO user_profile (email) VALUES (?)",
-               (email_addr,))
+                     (email_addr,))
     for k, v in fields.items():
         db.execute(f"UPDATE user_profile SET {k}=? WHERE email=?",
                    (v, email_addr))
@@ -176,6 +175,10 @@ def sums_for_codes(db, email_addr, codes, mode='month'):
     ids = _ids_for_mode(db, email_addr, mode)
     if not ids or not codes:
         return {'sum': 0.0, 'hours': 0.0}
+    # Месяц — как в расчетке: П-коды не суммируются с базовыми.
+    # Год / всё время — П схлопывается в базовый код (когда появятся кнопки).
+    if mode in ('year', 'all'):
+        codes = list(codes) + [c + 'П' for c in codes]
     row = db.execute(
         f"""SELECT COALESCE(SUM(sum),0), COALESCE(SUM(hours),0)
             FROM payslip_codes
@@ -194,6 +197,7 @@ def paid_sum(db, email_addr, mode='year'):
     return row[0] or 0.0
 
 def code_usage(db):
+    # П-коды схлопываются в базовый: справочник без отдельных записей 010П
     return dict(db.execute(
-        "SELECT code, COUNT(DISTINCT payslip_id) FROM payslip_codes "
-        "GROUP BY code"))    
+        "SELECT RTRIM(code, 'П'), COUNT(DISTINCT payslip_id) "
+        "FROM payslip_codes GROUP BY RTRIM(code, 'П')"))
