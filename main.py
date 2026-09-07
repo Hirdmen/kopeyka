@@ -827,27 +827,31 @@ class DetailScreen(MDScreen):
         for name, val, col in rows:
             g = GridLayout(cols=2, size_hint_y=None, height=dp(34))
             g.add_widget(left_label(name, DIM))
-            g.add_widget(
-                Label(
-                    text=f"{val:,.2f}" if val is not None else "—",
-                    color=col,
-                    font_size="14sp",
-                )
+            v = Label(
+                text=f"{val:,.2f}" if val is not None else "—",
+                color=col,
+                font_size="14sp",
+                halign="right",
+                valign="middle",
             )
+            v.bind(size=v.setter("text_size"))
+            g.add_widget(v)
             summ.add_widget(g)
         g = GridLayout(cols=2, size_hint_y=None, height=dp(44))
         g.add_widget(left_label("[b]ПОЛУЧКА[/b]", TEXT, "16sp"))
-        g.add_widget(
-            Label(
-                text=(
-                    f'[b][color=66BB6A]{d.get("paid"):,.2f}[/color][/b]'
-                    if d.get("paid") is not None
-                    else "—"
-                ),
-                markup=True,
-                font_size="18sp",
-            )
+        v = Label(
+            text=(
+                f'[b][color=66BB6A]{d.get("paid"):,.2f}[/color][/b]'
+                if d.get("paid") is not None
+                else "—"
+            ),
+            markup=True,
+            font_size="18sp",
+            halign="right",
+            valign="middle",
         )
+        v.bind(size=v.setter("text_size"))
+        g.add_widget(v)
         summ.add_widget(g)
         self.box.add_widget(summ)
         codes = Card()
