@@ -1,8 +1,8 @@
 [app]
 
-title = Копейка
+title = Копейка Тест
 package.name = kopeyka
-package.domain = org.kopeyka
+package.domain = org.kopeyka.test
 version = 1.0.2
 
 source.dir = .
