@@ -167,8 +167,17 @@ def parse_code_names(text):
         r'(\d{3})[\s\n]+([А-Яа-яЁёA-Za-z(][^\n]*)', text[m.end():])}
 
 
-# "3 цифры + сумма с 2 знаками". Справочник внизу не зацепит: там после кода текст.
-CODE_ROW = re.compile(r'(?<!\d)(\d{3})[\s\n]+(\d+\.\d{2})(?![\d.])')
+def code_display_name(code, names=None):
+    """Имя кода; для кодов с суффиксом П (перерасчет) — имя базового + пометка."""
+    base = code.rstrip('П')
+    is_p = len(base) != len(code)
+    nm = (names or {}).get(base) or CODE_NAMES.get(base) or f'Код {base}'
+    return f'{nm} (перерасчет)' if is_p else nm
+
+
+# "3 цифры + необязательная П (перерасчет) + сумма с 2 знаками".
+# Справочник внизу не зацепит: там после кода текст, а не сумма.
+CODE_ROW = re.compile(r'(?<!\d)(\d{3}[Пп]?)[\s\n]+(\d+\.\d{2})(?![\d.])')
 # Часы/дни после суммы (не путает со следующим кодом!)
 HOURS_TAIL = re.compile(r'[\s\n]+(\d+\.\d|\d+\s*дн)(?!\d)')
 
@@ -177,12 +186,13 @@ def parse_codes(text):
     """Возвращает (начисления, удержания): {код: {'sum': .., 'hours': ..}}"""
     accruals, deductions = {}, {}
     for m in CODE_ROW.finditer(text):
-        code = m.group(1)
+        code = m.group(1).upper()   # '010' или '010П'
+        base = code.rstrip('П')     # базовый код без П
         hours = None
         h = HOURS_TAIL.match(text, m.end())
         if h:
             hours = float(re.sub(r'[^\d.]', '', h.group(1)))
-        target = accruals if int(code) < 400 else deductions
+        target = accruals if int(base) < 400 else deductions
         target[code] = {'sum': float(m.group(2)), 'hours': hours}
     return accruals, deductions
 
@@ -263,7 +273,6 @@ if __name__ == '__main__':
                         ('УДЕРЖАНИЯ', data['deductions'])):
         print(kind + ':')
         for code, v in sorted(table.items()):
-            name = (data['code_names'].get(code) or CODE_NAMES.get(code)
-                    or f'Код {code}')
+            name = code_display_name(code, data['code_names'])
             hrs = f" ({v['hours']} ч/дн)" if v['hours'] else ''
             print(f"  {code} {name}: {v['sum']}{hrs}")
