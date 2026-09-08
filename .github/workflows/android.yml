@@ -55,13 +55,23 @@ jobs:
           ls -la ~/.android
       - name: Build APK
         run: |
-          buildozer android release -- \
-            --keystore "$HOME/.android/debug.keystore" \
-            --keyalias androiddebugkey \
-            --keystorepass android \
-            --keypass android
+          buildozer android debug
         env:
           JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
+
+      - name: Re-sign APK with our keystore
+        run: |
+          BT=$(ls -d "$HOME"/.buildozer/android/platform/android-sdk/build-tools/* | tail -1)
+          for f in bin/*.apk; do
+            "$BT/zipalign" -f 4 "$f" "$f.aligned"
+            mv "$f.aligned" "$f"
+            "$BT/apksigner" sign \
+              --ks "$HOME/.android/debug.keystore" \
+              --ks-key-alias androiddebugkey \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              "$f"
+          done
 
       - name: Show APK signature
         run: |
