@@ -3,7 +3,7 @@
 title = Копейка Тест
 package.name = kopeyka
 package.domain = org.kopeyka.test
-version = 1.0.2
+version = 1.0.3
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json
