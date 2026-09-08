@@ -1455,6 +1455,23 @@ class SalaryApp(MDApp):
     def on_stop(self):
         self.db.close()
 
+    def on_resume(self):
+        """Android: после возврата из фона текстуры могут быть пустыми —
+        принудительно пересоздаём их у всех Label/кнопок."""
+        def _fix(dt):
+            try:
+                for root_w in list(Window.children):
+                    for w in root_w.walk():
+                        if isinstance(w, Label):
+                            w.texture_update()
+                Window.ask_update()
+            except Exception as e:
+                print("[kopeyka] on_resume fix failed:", e)
+        Clock.schedule_once(_fix, 0.3)
+
+
+if __name__ == "__main__":
+    SalaryApp().run()
 
 if __name__ == "__main__":
     SalaryApp().run()
