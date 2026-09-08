@@ -63,6 +63,13 @@ jobs:
         env:
           JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
 
+      - name: Show APK signature
+        run: |
+          BT=$(ls -d "$HOME"/.buildozer/android/platform/android-sdk/build-tools/* | tail -1)
+          echo "=== APK ==="
+          "$BT/apksigner" verify --print-certs bin/*.apk
+          echo "=== Keystore ==="
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android | grep -i sha256
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
