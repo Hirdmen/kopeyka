@@ -55,7 +55,11 @@ jobs:
           ls -la ~/.android
       - name: Build APK
         run: |
-          buildozer android debug
+          buildozer android debug -- \
+            --keystore "$HOME/.android/debug.keystore" \
+            --keyalias androiddebugkey \
+            --keystorepass android \
+            --keypass android
         env:
           JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
 
