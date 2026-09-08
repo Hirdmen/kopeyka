@@ -55,7 +55,7 @@ jobs:
           ls -la ~/.android
       - name: Build APK
         run: |
-          buildozer android debug -- \
+          buildozer android release -- \
             --keystore "$HOME/.android/debug.keystore" \
             --keyalias androiddebugkey \
             --keystorepass android \
