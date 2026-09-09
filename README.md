@@ -1,8 +1,8 @@
 # Копейка («Расчетки»)
 
 Программа сотрудника АО «АВТОВАЗ»:  
-Приложение для сбора расчеток из почты: находит письма с расчетками,
-скачивает PDF, показывает историю начислений. Windows + Android (Kivy/KivyMD).
+Приложение для сбора расчеток из почты: скачивает расчетки в формате PDF с указанной папки или из входящих,
+показывает начисления за все месяца.  Windows + Android (Kivy/KivyMD).
 
 ## Структура
 - main.py — интерфейс и логика
@@ -10,7 +10,7 @@
 - storage.py — настройки и база (ПК: папка пользователя; Android: папка приложения)
 - main.spec — сборка exe (PyInstaller), имя сборки Kopeyka
 - buildozer.spec — сборка APK
-- .github/workflows/android.yml — автосборка APK (GitHub Actions)
+- .github/workflows/android.yml —  APK (GitHub Actions)
 - ИНСТРУКЦИЯ.md — руководство пользователя
 
 ## Сборка Windows
@@ -19,7 +19,7 @@ pyinstaller main.spec
 Результат: dist/Kopeyka/ (Kopeyka.exe + _internal) → запаковать в zip.
 
 ## Сборка Android
-Автосборка при пуше в main / android-test.
+Сборка в ручную в main / android-test.
 Подпись: секрет DEBUG_KEYSTORE_B64. НЕ перегенерировать ключ —
 иначе обновления перестанут ставиться поверх.
 
