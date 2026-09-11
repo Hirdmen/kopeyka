@@ -1335,34 +1335,67 @@ class AboutScreen(MDScreen):
             rel = github_latest_release()
             tag = (rel.get("tag_name") or "").lstrip("v")
             page = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
+            
+            # Определяем канал
+            from kivy.utils import platform
+            is_android = platform == "android"
+            
+            # Читаем канал из файла (если есть) или определяем по платформе
+            channel = "github"  # по умолчанию
+            try:
+                with open(os.path.join(os.path.dirname(__file__), "channel.txt"), "r") as f:
+                    channel = f.read().strip()
+            except:
+                if is_android:
+                    channel = "github"  # или "test" для android-test ветки
+                elif getattr(sys, "frozen", False):
+                    channel = "github"
+            
             if _ver_tuple(tag) <= _ver_tuple(APP_VERSION):
                 self._status(f"У вас последняя версия: v{APP_VERSION}.")
                 return
-            asset = next(
-                (
-                    a
-                    for a in rel.get("assets", [])
-                    if a["name"].lower().endswith(".zip")
-                ),
-                None,
-            )
-            if not getattr(sys, "frozen", False) or not asset:
-                self._status(
-                    f"Доступна v{tag}! Автообновление — в собранной "
-                    f"версии; открываю страницу релиза…"
+            
+            # RuStore канал - редирект в магазин
+            if channel == "rustore":
+                self._status(f"Доступна v{tag}! Открываю RuStore…")
+                if is_android:
+                    from jnius import autoclass
+                    Intent = autoclass('android.content.Intent')
+                    Uri = autoclass('android.net.Uri')
+                    intent = Intent(Intent.ACTION_VIEW, Uri.parse(f"https://apps.rustore.ru/app/your.package.name"))
+                    activity = autoclass('org.kivy.android.PythonActivity').mActivity
+                    activity.startActivity(intent)
+                else:
+                    webbrowser.open(f"https://apps.rustore.ru/app/your.package.name")
+                return
+            
+            # Ищем APK для Android, ZIP для Windows
+            asset = None
+            if is_android:
+                asset = next(
+                    (a for a in rel.get("assets", []) if a["name"].lower().endswith(".apk")),
+                    None,
                 )
+            else:
+                asset = next(
+                    (a for a in rel.get("assets", []) if a["name"].lower().endswith(".zip")),
+                    None,
+                )
+            
+            if not asset:
+                self._status(f"Доступна v{tag}! Открываю страницу релиза…")
                 webbrowser.open(page)
                 return
+            
             self._status(f"Качаю v{tag}…")
-            zip_path = os.path.join(tempfile.gettempdir(), asset["name"])
-            urllib.request.urlretrieve(asset["browser_download_url"], zip_path)
-            self._status("Распаковываю…")
-            staging = os.path.join(tempfile.gettempdir(), "kopeyka_update")
-            if os.path.isdir(staging):
-                shutil.rmtree(staging)
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(staging)
-            self._apply_update(staging)
+            file_path = os.path.join(tempfile.gettempdir(), asset["name"])
+            urllib.request.urlretrieve(asset["browser_download_url"], file_path)
+            
+            if is_android:
+                self._install_apk(file_path)
+            else:
+                self._apply_update_windows(file_path)
+                
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 self._status("Обновлений не найдено — у вас актуальная версия.")
@@ -1373,7 +1406,56 @@ class AboutScreen(MDScreen):
         finally:
             Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
 
-    def _apply_update(self, staging):
+    def _install_apk(self, apk_path):
+        """Установка APK через системный установщик Android"""
+        from jnius import autoclass
+        from kivy.utils import platform
+        
+        if platform != "android":
+            self._status("Ошибка: не Android платформа")
+            return
+        
+        Intent = autoclass('android.content.Intent')
+        Uri = autoclass('android.net.Uri')
+        File = autoclass('java.io.File')
+        Build = autoclass('android.os.Build')
+        
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        
+        # Для Android 8+ нужно разрешение REQUEST_INSTALL_PACKAGES
+        if Build.VERSION.SDK_INT >= 26:
+            # Проверяем разрешение
+            if not activity.getPackageManager().canRequestPackageInstalls():
+                self._status("Требуется разрешение на установку. Открываю настройки…")
+                intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES", 
+                               Uri.parse("package:" + activity.getPackageName()))
+                activity.startActivity(intent)
+                return
+        
+        # Копируем APK в публичную папку (Downloads)
+        import shutil
+        downloads = os.path.join(os.path.expanduser("~"), "Download")
+        apk_name = os.path.basename(apk_path)
+        public_apk = os.path.join(downloads, apk_name)
+        shutil.copy2(apk_path, public_apk)
+        
+        # Открываем установщик
+        intent = Intent(Intent.ACTION_VIEW)
+        intent.setDataAndType(Uri.fromFile(File(public_apk)), "application/vnd.android.package-archive")
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        
+        self._status("Открываю установщик…")
+        activity.startActivity(intent)
+
+    def _apply_update_windows(self, zip_path):
+        """Применение обновления для Windows (старая логика)"""
+        self._status("Распаковываю…")
+        staging = os.path.join(tempfile.gettempdir(), "kopeyka_update")
+        if os.path.isdir(staging):
+            shutil.rmtree(staging)
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(staging)
+        
         app_dir = os.path.dirname(sys.executable)
         exe = sys.executable
         ps1 = os.path.join(tempfile.gettempdir(), "kopeyka_update.ps1")
