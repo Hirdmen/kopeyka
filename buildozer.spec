@@ -3,7 +3,9 @@
 title = Копейка Тест
 package.name = kopeyka
 package.domain = org.kopeyka.test
-version = 1.0.3
+version = 1.0.4
+icon.filename = %(source.dir)s/icon.png
+presplash.filename = %(source.dir)s/presplash.png
 
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json

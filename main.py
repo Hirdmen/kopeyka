@@ -113,6 +113,7 @@ DEV_NAME = "Hirdmen"
 DEV_EMAIL = "hird78lvl@yandex.ru"
 DONATE_URL = "https://c2c.cbrpay.ru/AS1I0034FA1DBA2G8IJAPIBMBTBR13O1"
 QR_PATH = os.path.join(APP_DIR, "donate_qr.png")
+ICON_PATH = os.path.join(APP_DIR, "icon.png")
 
 # ── палитра ────────────────────────────────────────────────
 BG = (0.07, 0.08, 0.10, 1)
@@ -1405,12 +1406,15 @@ class SalaryApp(MDApp):
     current_detail = None
 
     def build(self):
+        self.title = "Копейка"
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Green"
         self.theme_cls.ripple_scale = 0
         self.theme_cls.ripple_duration_out = 0
         self.theme_cls.ripple_duration_in = 0
         Window.clearcolor = BG
+        if _platform != "android" and os.path.exists(ICON_PATH):
+            Window.set_icon(ICON_PATH)
         self.theme_cls.ripple_scale = 0
         self.db = storage.connect(DB_PATH)
         self.cfg = load_config()
