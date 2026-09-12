@@ -10,6 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set channel flag
+        run: |
+          echo "${{ github.ref_name == 'android-test' && 'test' || 'github' }}" > channel.txt
+          cat channel.txt
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
