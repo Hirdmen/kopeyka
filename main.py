@@ -1450,20 +1450,40 @@ class AboutScreen(MDScreen):
         finally:
             Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
 
+    def _publish_to_downloads(self, src_path, mime="application/vnd.android.package-archive"):
+        """Публикует файл в Загрузки/Kopeyka через MediaStore (Android 10+)."""
+        from jnius import autoclass  # type: ignore
+        ContentValues = autoclass("android.content.ContentValues")
+        MediaStore = autoclass("android.provider.MediaStore")
+        Environment = autoclass("android.os.Environment")
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        values = ContentValues()
+        values.put("_display_name", os.path.basename(src_path))
+        values.put("mime_type", mime)
+        values.put("relative_path", Environment.DIRECTORY_DOWNLOADS + "/Kopeyka")
+        resolver = activity.getContentResolver()
+        uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if uri is None:
+            return None
+        out = resolver.openOutputStream(uri)
+        try:
+            with open(src_path, "rb") as f:
+                out.write(f.read())
+        finally:
+            out.close()
+        return uri
+
     def _install_apk(self, apk_path):
         """Установка APK через системный установщик Android."""
         from jnius import autoclass  # type: ignore
-
         Intent = autoclass("android.content.Intent")
         Uri = autoclass("android.net.Uri")
         File = autoclass("java.io.File")
         BuildVersion = autoclass("android.os.Build$VERSION")
+        PackageManager = autoclass("android.content.pm.PackageManager")
         activity = autoclass("org.kivy.android.PythonActivity").mActivity
 
-        if (
-            BuildVersion.SDK_INT >= 26
-            and not activity.getPackageManager().canRequestPackageInstalls()
-        ):
+        if BuildVersion.SDK_INT >= 26 and not activity.getPackageManager().canRequestPackageInstalls():
             self._status("Разреши установку из этого источника в настройках…")
             intent = Intent(
                 "android.settings.MANAGE_UNKNOWN_APP_SOURCES",
@@ -1472,12 +1492,22 @@ class AboutScreen(MDScreen):
             activity.startActivity(intent)
             return
 
+        uri = None
         try:
-            FileProvider = autoclass("androidx.core.content.FileProvider")
-            authority = activity.getPackageName() + ".fileprovider"
-            uri = FileProvider.getUriForFile(activity, authority, File(apk_path))
+            info = activity.getPackageManager().getPackageInfo(
+                activity.getPackageName(), PackageManager.GET_PROVIDERS)
+            for p in (info.providers or []):
+                if p.name and "FileProvider" in p.name and p.authority:
+                    fp = autoclass("androidx.core.content.FileProvider")
+                    uri = fp.getUriForFile(activity, p.authority.split(";")[0], File(apk_path))
+                    break
         except Exception:
-            uri = Uri.fromFile(File(apk_path))
+            uri = None
+        if uri is None and BuildVersion.SDK_INT >= 29:
+            uri = self._publish_to_downloads(apk_path)
+        if uri is None:
+            self._status("Ошибка обновления: не удалось передать APK установщику.")
+            return
 
         intent = Intent(Intent.ACTION_VIEW)
         intent.setDataAndType(uri, "application/vnd.android.package-archive")
