@@ -1454,7 +1454,7 @@ class AboutScreen(MDScreen):
         """Публикует файл в Загрузки/Kopeyka через MediaStore (Android 10+)."""
         from jnius import autoclass  # type: ignore
         ContentValues = autoclass("android.content.ContentValues")
-        MediaStore = autoclass("android.provider.MediaStore")
+        Downloads = autoclass("android.provider.MediaStore$Downloads")
         Environment = autoclass("android.os.Environment")
         activity = autoclass("org.kivy.android.PythonActivity").mActivity
         values = ContentValues()
@@ -1462,7 +1462,7 @@ class AboutScreen(MDScreen):
         values.put("mime_type", mime)
         values.put("relative_path", Environment.DIRECTORY_DOWNLOADS + "/Kopeyka")
         resolver = activity.getContentResolver()
-        uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values)
         if uri is None:
             return None
         out = resolver.openOutputStream(uri)
