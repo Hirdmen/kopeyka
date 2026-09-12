@@ -15,7 +15,7 @@ requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.1,kivymd==2.0.0,pil
 orientation = portrait
 fullscreen = 0
 
-android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, ACCESS_NETWORK_STATE
+android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, ACCESS_NETWORK_STATE, REQUEST_INSTALL_PACKAGES
 
 android.api = 33
 android.minapi = 24
