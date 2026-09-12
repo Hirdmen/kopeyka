@@ -12,7 +12,7 @@ if _platform != "android":
     Config.set("input", "mouse", "mouse,disable_multitouch")
 Config.set("graphics", "vsync", 1)
 Config.set("graphics", "maxfps", 60)
-Config.set('graphics', 'multisamples', '0')
+Config.set("graphics", "multisamples", "0")
 
 import os
 import re
@@ -61,6 +61,7 @@ os.environ["SSL_CERT_FILE"] = _CA_FILE
 os.environ["REQUESTS_CA_BUNDLE"] = _CA_FILE
 os.environ["SSL_CERT_DIR"] = _CA_DIR
 
+
 def _make_ssl_ctx(*args, **kwargs):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     try:
@@ -74,6 +75,7 @@ def _make_ssl_ctx(*args, **kwargs):
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.check_hostname = True
     return ctx
+
 
 ssl._create_default_https_context = _make_ssl_ctx
 
@@ -224,8 +226,10 @@ def github_latest_release(include_pre=False):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=15"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "Kopeyka/" + APP_VERSION,
-                 "Accept": "application/vnd.github+json"},
+        headers={
+            "User-Agent": "Kopeyka/" + APP_VERSION,
+            "Accept": "application/vnd.github+json",
+        },
     )
     with urllib.request.urlopen(req, timeout=20) as r:
         items = json.loads(r.read().decode("utf-8"))
@@ -235,8 +239,11 @@ def github_latest_release(include_pre=False):
         if rel.get("prerelease") and not include_pre:
             continue
         return rel
-    return {"tag_name": "", "html_url": f"https://github.com/{GITHUB_REPO}/releases",
-            "assets": []}
+    return {
+        "tag_name": "",
+        "html_url": f"https://github.com/{GITHUB_REPO}/releases",
+        "assets": [],
+    }
 
 
 # ── стиль-виджеты ──────────────────────────────────────────
@@ -398,7 +405,7 @@ def left_label(text, color=TEXT, size="14sp"):
         text=text,
         color=color,
         font_size=size,
-        markup=True,  
+        markup=True,
         halign="left",
         valign="middle",
         size_hint_y=None,
@@ -406,6 +413,7 @@ def left_label(text, color=TEXT, size="14sp"):
     lab.bind(texture_size=lambda i, v: setattr(i, "height", v[1] + dp(10)))
     lab.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
     return lab
+
 
 from kivy.uix.behaviors import ButtonBehavior
 
@@ -468,6 +476,7 @@ Google: слева «Ещё» -> «Создать ярлык» -> «Расчет
 Если не создавать папку и не указать её в настройках — поиск будет
 осуществляться по всем входящим письмам, что существенно дольше."""
 
+
 def _linkify(t):
     """Превращает http(s)-ссылки в тексте в кликабельные [ref] (markup)."""
     return re.sub(
@@ -476,29 +485,43 @@ def _linkify(t):
         t,
     )
 
+
 def show_code_card(code, name, s, h):
     """Плитка-карточка кода: полное имя, сумма, часы (если есть)."""
     hexcol = "FF6B66" if int(str(code).rstrip("П")) >= 400 else "66BB6A"
-    box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(12),
-                    size_hint_y=None)
+    box = BoxLayout(
+        orientation="vertical", spacing=dp(6), padding=dp(12), size_hint_y=None
+    )
     box.bind(minimum_height=box.setter("height"))
-    box.add_widget(left_label(
-        f"[b][size=22sp][color={hexcol}]{code}[/color][/size][/b]", TEXT, "22sp"))
-    nl = Label(text=name, color=TEXT, font_size="16sp",
-               halign="left", valign="top", size_hint_y=None)
+    box.add_widget(
+        left_label(
+            f"[b][size=22sp][color={hexcol}]{code}[/color][/size][/b]", TEXT, "22sp"
+        )
+    )
+    nl = Label(
+        text=name,
+        color=TEXT,
+        font_size="16sp",
+        halign="left",
+        valign="top",
+        size_hint_y=None,
+    )
     nl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
     nl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
     box.add_widget(nl)
     if h:
-        line = (f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
-                f"     Часы: [b][color={hexcol}]{h:.1f}[/color][/b]")
+        line = (
+            f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
+            f"     Часы: [b][color={hexcol}]{h:.1f}[/color][/b]"
+        )
     else:
         line = f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
     box.add_widget(left_label(line, TEXT, "16sp"))
     sv = ScrollView(do_scroll_y=True)
     sv.add_widget(box)
-    Popup(title="Код начисления/удержания", content=sv,
-          size_hint=(0.85, 0.45)).open()
+    Popup(title="Код начисления/удержания", content=sv, size_hint=(0.85, 0.45)).open()
+
+
 def _clamp_two_lines(lbl, full_text, max_px):
     """Вписать текст в max_px высоты (≈2 строки); не влезает — обрезать с '…'."""
     lbl.text = full_text
@@ -508,13 +531,14 @@ def _clamp_two_lines(lbl, full_text, max_px):
     lo, hi = 0, len(full_text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        lbl.text = full_text[:mid] + '…'
+        lbl.text = full_text[:mid] + "…"
         lbl.texture_update()
         if lbl.texture_size[1] <= max_px:
             lo = mid
         else:
             hi = mid - 1
-    lbl.text = full_text[:lo] + '…'
+    lbl.text = full_text[:lo] + "…"
+
 
 def password_row(initial="", hint="Пароль"):
     """Поле пароля + кнопка видимости (abc / •••)."""
@@ -685,19 +709,26 @@ class MainScreen(MDScreen):
         popup.open()
 
     def open_help(self, *a):
-        box = BoxLayout(orientation="vertical", spacing=dp(4), padding=dp(12),
-                        size_hint_y=None)
+        box = BoxLayout(
+            orientation="vertical", spacing=dp(4), padding=dp(12), size_hint_y=None
+        )
         box.bind(minimum_height=box.setter("height"))
-        lbl = Label(text=_linkify(HELP_TEXT), color=TEXT, font_size="15sp",
-                    markup=True, halign="left", valign="top", size_hint_y=None)
+        lbl = Label(
+            text=_linkify(HELP_TEXT),
+            color=TEXT,
+            font_size="15sp",
+            markup=True,
+            halign="left",
+            valign="top",
+            size_hint_y=None,
+        )
         lbl.bind(on_ref_press=lambda i, ref: webbrowser.open(ref))
         lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
         lbl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
         box.add_widget(lbl)
         sv = ScrollView(do_scroll_y=True)
         sv.add_widget(box)
-        Popup(title="Инструкция по настройке", content=sv,
-              size_hint=(0.95, 0.9)).open()
+        Popup(title="Инструкция по настройке", content=sv, size_hint=(0.95, 0.9)).open()
 
     def go(self, name):
         self.manager.current = name
@@ -927,7 +958,7 @@ class DetailScreen(MDScreen):
             lbl1.bind(size=lbl1.setter("text_size"))
 
             # название: перенос до 2 строк, длинное обрезается
-                       # название: максимум 2 строки, излишек — «…» справа
+            # название: максимум 2 строки, излишек — «…» справа
             lbl2 = Label(
                 text=name,
                 color=col,
@@ -939,10 +970,11 @@ class DetailScreen(MDScreen):
 
             def _refit(i, v, lbl=lbl2, full=name):
                 lbl.text_size = (v[0], None)
-                lbl.text = 'Проба'
+                lbl.text = "Проба"
                 lbl.texture_update()
                 one = lbl.texture_size[1]
                 _clamp_two_lines(lbl, full, one * 2 + dp(4))
+
             lbl2.bind(size=_refit)
 
             hours_text = f"{h:.1f}" if h else ""
@@ -973,8 +1005,11 @@ class DetailScreen(MDScreen):
             row.add_widget(lbl2)
             row.add_widget(lbl3)
             row.add_widget(lbl4)
-            row.bind(on_release=lambda *a, c=code, n=name, ss=s, hh=h:
-                     show_code_card(c, n, ss, hh))
+            row.bind(
+                on_release=lambda *a, c=code, n=name, ss=s, hh=h: show_code_card(
+                    c, n, ss, hh
+                )
+            )
             codes.add_widget(row)
         self.box.add_widget(codes)
 
@@ -1156,7 +1191,6 @@ class CodesScreen(MDScreen):
         )
         self._last_q = self.search_field.text
         self._render(self.search_field.text)
-        
 
     def _render(self, q=""):
         self.box.clear_widgets()
@@ -1214,7 +1248,9 @@ class CodesScreen(MDScreen):
         # за всё время: П-перерасчеты считаем вместе с базовым кодом
         n = app.db.execute(
             "SELECT COUNT(DISTINCT payslip_id) FROM payslip_codes "
-            "WHERE code = ? OR code = ? || 'П'", (code, code)).fetchone()[0]
+            "WHERE code = ? OR code = ? || 'П'",
+            (code, code),
+        ).fetchone()[0]
         box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
         box.add_widget(
             left_label(
@@ -1349,6 +1385,7 @@ class AboutScreen(MDScreen):
     def _update_worker(self):
         try:
             from kivy.utils import platform as _pf
+
             is_android = _pf == "android"
 
             channel = CHANNEL or ("test" if is_android else "github")
@@ -1367,6 +1404,7 @@ class AboutScreen(MDScreen):
                 if is_android:
                     try:
                         from jnius import autoclass  # type: ignore
+
                         Intent = autoclass("android.content.Intent")
                         Uri = autoclass("android.net.Uri")
                         act = autoclass("org.kivy.android.PythonActivity").mActivity
@@ -1413,43 +1451,57 @@ class AboutScreen(MDScreen):
             Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
 
     def _install_apk(self, apk_path):
-        """Установка APK через системный установщик Android"""
-        from jnius import autoclass
-        from kivy.utils import platform
-        
-        if platform != "android":
-            self._status("Ошибка: не Android платформа")
+        """Установка APK через системный установщик Android."""
+        from jnius import autoclass  # type: ignore
+
+        Intent = autoclass("android.content.Intent")
+        Uri = autoclass("android.net.Uri")
+        File = autoclass("java.io.File")
+        BuildVersion = autoclass("android.os.Build$VERSION")
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+
+        if (
+            BuildVersion.SDK_INT >= 26
+            and not activity.getPackageManager().canRequestPackageInstalls()
+        ):
+            self._status("Разреши установку из этого источника в настройках…")
+            intent = Intent(
+                "android.settings.MANAGE_UNKNOWN_APP_SOURCES",
+                Uri.parse("package:" + activity.getPackageName()),
+            )
+            activity.startActivity(intent)
             return
-        
-        Intent = autoclass('android.content.Intent')
-        Uri = autoclass('android.net.Uri')
-        File = autoclass('java.io.File')
-        Build = autoclass('android.os.Build')
-        
-        activity = autoclass('org.kivy.android.PythonActivity').mActivity
-        
-        # Для Android 8+ нужно разрешение REQUEST_INSTALL_PACKAGES
-        if Build.VERSION.SDK_INT >= 26:
-            # Проверяем разрешение
-            if not activity.getPackageManager().canRequestPackageInstalls():
-                self._status("Требуется разрешение на установку. Открываю настройки…")
-                intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES", 
-                               Uri.parse("package:" + activity.getPackageName()))
-                activity.startActivity(intent)
-                return
-        
+
+        try:
+            FileProvider = autoclass("androidx.core.content.FileProvider")
+            authority = activity.getPackageName() + ".fileprovider"
+            uri = FileProvider.getUriForFile(activity, authority, File(apk_path))
+        except Exception:
+            uri = Uri.fromFile(File(apk_path))
+
+        intent = Intent(Intent.ACTION_VIEW)
+        intent.setDataAndType(uri, "application/vnd.android.package-archive")
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        self._status("Открываю установщик…")
+        activity.startActivity(intent)
+        return
+
         # Копируем APK в публичную папку (Downloads)
         import shutil
+
         downloads = os.path.join(os.path.expanduser("~"), "Download")
         apk_name = os.path.basename(apk_path)
         public_apk = os.path.join(downloads, apk_name)
         shutil.copy2(apk_path, public_apk)
-        
+
         # Открываем установщик
         intent = Intent(Intent.ACTION_VIEW)
-        intent.setDataAndType(Uri.fromFile(File(public_apk)), "application/vnd.android.package-archive")
+        intent.setDataAndType(
+            Uri.fromFile(File(public_apk)), "application/vnd.android.package-archive"
+        )
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        
+
         self._status("Открываю установщик…")
         activity.startActivity(intent)
 
@@ -1461,7 +1513,7 @@ class AboutScreen(MDScreen):
             shutil.rmtree(staging)
         with zipfile.ZipFile(zip_path) as z:
             z.extractall(staging)
-        
+
         app_dir = os.path.dirname(sys.executable)
         exe = sys.executable
         ps1 = os.path.join(tempfile.gettempdir(), "kopeyka_update.ps1")
@@ -1550,6 +1602,7 @@ class SalaryApp(MDApp):
     def on_resume(self):
         """Android: после возврата из фона текстуры могут быть пустыми —
         принудительно пересоздаём их у всех Label/кнопок."""
+
         def _fix(dt):
             try:
                 for root_w in list(Window.children):
@@ -1559,6 +1612,7 @@ class SalaryApp(MDApp):
                 Window.ask_update()
             except Exception as e:
                 print("[kopeyka] on_resume fix failed:", e)
+
         Clock.schedule_once(_fix, 0.3)
 
 
