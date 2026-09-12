@@ -37,6 +37,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer cython
 
+      - name: Cache buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            $HOME/.buildozer
+            .buildozer
+          key: buildozer-ubuntu-v1
+
       - name: Pre-download freetype from mirrors
         run: |
           D=.buildozer/android/platform/build-arm64-v8a/packages/freetype
