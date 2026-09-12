@@ -108,6 +108,10 @@ CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
 APP_NAME = "Расчетки"
 APP_VERSION = "1.0.4"
+try:
+    from channel import CHANNEL
+except Exception:
+    CHANNEL = None
 GITHUB_REPO = "Hirdmen/kopeyka"
 DEV_NAME = "Hirdmen"
 DEV_EMAIL = "hird78lvl@yandex.ru"
@@ -207,20 +211,32 @@ def save_config(cfg):
 
 # ── обновления ────────────────────────────────────────
 def _ver_tuple(s):
-    return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3])
+    """'1.0.4' или '1.0.5-test.1' -> (1, 0, 5)."""
+    base = (s or "").split("-")[0]
+    out = []
+    for p in base.split("."):
+        if p.isdigit():
+            out.append(int(p))
+    return tuple(out) or (0,)
 
 
-def github_latest_release():
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+def github_latest_release(include_pre=False):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=15"
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Kopeyka/" + APP_VERSION,
-            "Accept": "application/vnd.github+json",
-        },
+        headers={"User-Agent": "Kopeyka/" + APP_VERSION,
+                 "Accept": "application/vnd.github+json"},
     )
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        items = json.loads(r.read().decode("utf-8"))
+    for rel in items:
+        if rel.get("draft"):
+            continue
+        if rel.get("prerelease") and not include_pre:
+            continue
+        return rel
+    return {"tag_name": "", "html_url": f"https://github.com/{GITHUB_REPO}/releases",
+            "assets": []}
 
 
 # ── стиль-виджеты ──────────────────────────────────────────
@@ -1332,70 +1348,60 @@ class AboutScreen(MDScreen):
 
     def _update_worker(self):
         try:
-            rel = github_latest_release()
+            from kivy.utils import platform as _pf
+            is_android = _pf == "android"
+
+            channel = CHANNEL or ("test" if is_android else "github")
+            self._status(f"Канал: {channel}, проверяю GitHub…")
+            rel = github_latest_release(include_pre=(channel == "test"))
             tag = (rel.get("tag_name") or "").lstrip("v")
             page = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-            
-            # Определяем канал
-            from kivy.utils import platform
-            is_android = platform == "android"
-            
-            # Читаем канал из файла (если есть) или определяем по платформе
-            channel = "github"  # по умолчанию
-            try:
-                with open(os.path.join(os.path.dirname(__file__), "channel.txt"), "r") as f:
-                    channel = f.read().strip()
-            except:
-                if is_android:
-                    channel = "github"  # или "test" для android-test ветки
-                elif getattr(sys, "frozen", False):
-                    channel = "github"
-            
-            if _ver_tuple(tag) <= _ver_tuple(APP_VERSION):
+
+            if not tag or _ver_tuple(tag) <= _ver_tuple(APP_VERSION):
                 self._status(f"У вас последняя версия: v{APP_VERSION}.")
                 return
-            
-            # RuStore канал - редирект в магазин
+
             if channel == "rustore":
-                self._status(f"Доступна v{tag}! Открываю RuStore…")
+                url = "https://www.rustore.ru/catalog/app/TODO_PACKAGE"
+                self._status(f"Доступна v{tag}! Обновите в RuStore.")
                 if is_android:
-                    from jnius import autoclass
-                    Intent = autoclass('android.content.Intent')
-                    Uri = autoclass('android.net.Uri')
-                    intent = Intent(Intent.ACTION_VIEW, Uri.parse(f"https://apps.rustore.ru/app/your.package.name"))
-                    activity = autoclass('org.kivy.android.PythonActivity').mActivity
-                    activity.startActivity(intent)
+                    try:
+                        from jnius import autoclass  # type: ignore
+                        Intent = autoclass("android.content.Intent")
+                        Uri = autoclass("android.net.Uri")
+                        act = autoclass("org.kivy.android.PythonActivity").mActivity
+                        act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    except Exception:
+                        webbrowser.open(url)
                 else:
-                    webbrowser.open(f"https://apps.rustore.ru/app/your.package.name")
+                    webbrowser.open(url)
                 return
-            
-            # Ищем APK для Android, ZIP для Windows
-            asset = None
-            if is_android:
-                asset = next(
-                    (a for a in rel.get("assets", []) if a["name"].lower().endswith(".apk")),
-                    None,
+
+            ext = ".apk" if is_android else ".zip"
+            asset = next(
+                (a for a in rel.get("assets", []) if a["name"].lower().endswith(ext)),
+                None,
+            )
+            if not is_android and not getattr(sys, "frozen", False):
+                self._status(
+                    f"Доступна v{tag}! Автообновление — в собранной версии; "
+                    f"открываю страницу релиза…"
                 )
-            else:
-                asset = next(
-                    (a for a in rel.get("assets", []) if a["name"].lower().endswith(".zip")),
-                    None,
-                )
-            
+                webbrowser.open(page)
+                return
             if not asset:
                 self._status(f"Доступна v{tag}! Открываю страницу релиза…")
                 webbrowser.open(page)
                 return
-            
+
             self._status(f"Качаю v{tag}…")
             file_path = os.path.join(tempfile.gettempdir(), asset["name"])
             urllib.request.urlretrieve(asset["browser_download_url"], file_path)
-            
+
             if is_android:
                 self._install_apk(file_path)
             else:
                 self._apply_update_windows(file_path)
-                
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 self._status("Обновлений не найдено — у вас актуальная версия.")

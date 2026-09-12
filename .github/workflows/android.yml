@@ -12,8 +12,8 @@ jobs:
 
       - name: Set channel flag
         run: |
-          echo "${{ github.ref_name == 'android-test' && 'test' || 'github' }}" > channel.txt
-          cat channel.txt
+          echo "CHANNEL = '${{ github.ref_name == 'android-test' && 'test' || 'github' }}'" > channel.py
+          cat channel.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,56 +43,4 @@ jobs:
           mkdir -p "$D"
           curl -fL --retry 3 --retry-delay 5 -o "$D/freetype-2.14.1.tar.gz" "https://downloads.sourceforge.net/project/freetype/freetype2/2.14.1/freetype-2.14.1.tar.gz" \
             || curl -fL --retry 3 --retry-delay 5 -o "$D/freetype-2.14.1.tar.gz" "https://ftp.osuosl.org/pub/blfs/conglomeration/freetype/freetype-2.14.1.tar.gz" \
-            || curl -fL --retry 3 --retry-delay 5 -o "$D/freetype-2.14.1.tar.gz" "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.gz"
-          
-          if [ -s "$D/freetype-2.14.1.tar.gz" ]; then
-            touch "$D/.mark-freetype-2.14.1.tar.gz"
-            echo "✅ Freetype successfully downloaded!"
-            ls -la "$D"
-          else
-            echo "❌ ERROR: freetype download failed from all mirrors"
-            exit 1
-          fi
-      - name: Restore signing keystore
-        run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
-          ls -la ~/.android
-      - name: Build APK
-        run: |
-          buildozer android debug
-        env:
-          JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
-
-      - name: Re-sign APK with our keystore
-        run: |
-          BT=$(ls -d "$HOME"/.buildozer/android/platform/android-sdk/build-tools/* | tail -1)
-          for f in bin/*.apk; do
-            "$BT/zipalign" -f 4 "$f" "$f.aligned"
-            mv "$f.aligned" "$f"
-            "$BT/apksigner" sign \
-              --ks "$HOME/.android/debug.keystore" \
-              --ks-key-alias androiddebugkey \
-              --ks-pass pass:android \
-              --key-pass pass:android \
-              "$f"
-          done
-
-      - name: Show APK signature
-        run: |
-          BT=$(ls -d "$HOME"/.buildozer/android/platform/android-sdk/build-tools/* | tail -1)
-          echo "=== APK ==="
-          "$BT/apksigner" verify --print-certs bin/*.apk
-          echo "=== Keystore ==="
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android | grep -i sha256
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: bin/*.apk
-
-      - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: bin/*.apk
+            || curl -fL --retry 3 --retry-delay 5 -o
