@@ -1,8 +1,8 @@
 [app]
 
-title = Копейка Тест
+title = Копейка
 package.name = kopeyka
-package.domain = org.kopeyka.test
+package.domain = org.kopeyka
 version = 1.0.4
 icon.filename = %(source.dir)s/icon.png
 presplash.filename = %(source.dir)s/presplash.png
