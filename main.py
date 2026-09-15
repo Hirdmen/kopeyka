@@ -29,6 +29,7 @@ import webbrowser
 import zipfile
 import urllib.request
 import urllib.error
+import re
 from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -872,20 +873,43 @@ class MainScreen(MDScreen):
             folder = (acc.get("folder") or "").strip()
             if not folder:
                 folder = _auto_folder(conn) or "INBOX"
-                self.log_line(f"Папка не указана: читаю {_from_utf7(folder)}")
-            try:
-                typ, _ = conn.select(_quote_folder(folder))
-            except UnicodeEncodeError:
-                self.log_line("→ Имя папки кодирую в UTF-7...")
-                typ, _ = conn.select(_quote_folder(_imap_utf7(folder)))
-            if typ != "OK":
+                if folder == "INBOX" and not addr.lower().endswith("@gmail.com"):
+                    self.log_line("Папка не указана: обхожу все папки...")
+                    _, dirs = conn.list()
+                    skip_words = {"spam", "junk", "trash", "sent", "drafts", "archive", "архив"}
+                    folders_to_scan = []
+                    for d in dirs:
+                        line = d.decode("utf-8")
+                        match = re.match(r'\([^)]*\)\s+"(.)"\s+"(.+)"$', line)
+                        if match:
+                            fname = match.group(2)
+                            if not any(sw in fname.lower() for sw in skip_words):
+                                folders_to_scan.append(fname)
+                    if not folders_to_scan:
+                        folders_to_scan = ["INBOX"]
+                else:
+                    self.log_line(f"Папка не указана: читаю {_from_utf7(folder)}")
+                    folders_to_scan = [folder]
+            else:
+                self.log_line(f"Папка указана: читаю {folder}")
+                folders_to_scan = [folder]               
+            def select_folder(name):
+                try:
+                    typ, _ = conn.select(_quote_folder(name))
+                except UnicodeEncodeError:
+                    self.log_line("→ Имя папки кодирую в UTF-7...")
+                    typ, _ = conn.select(_quote_folder(_imap_utf7(name)))                    
+                return typ == "OK"
+
+            def folder_names_hint():
                 _, dirs = conn.list()
                 names = []
                 for d in dirs or []:
-                    txt = d.decode("ascii", "replace")
-                    if ' "' in txt:
-                        names.append(_from_utf7(txt.split(' "')[-2]))
-                raise Exception(f'Папка "{folder}" не найдена. На сервере: {names}')
+                    line = d.decode("utf-8")
+                    match = re.match(r'\([^)]*\)\s+"(.)"\s+"(.+)"$', line)
+                    if match:
+                        names.append(_from_utf7(match.group(2)))
+                return names
 
             app = MDApp.get_running_app()
             first_run = not storage.list_payslips(app.db, addr)
@@ -893,6 +917,29 @@ class MainScreen(MDScreen):
             senders = list(dict.fromkeys(list(senders) + list(KNOWN_SENDER_SEEDS)))
             since = acc.get("_since") or _last_check(addr)
             acc.pop("_since", None)
+            per_folder = []
+            if not full:
+                for scan_folder in folders_to_scan:
+                    if not select_folder(scan_folder):
+                        if folder:
+                            raise Exception(f'Папка "{folder}" не найдена. На сервере: {folder_names_hint()}')
+                        self.log_line(f"Папка недоступна, пропускаю: {scan_folder}")
+                        continue
+                    keys = []
+                    if since and not first_run:
+                        keys += ["SINCE", since]
+                    if senders:
+                        keys += _or_from_keys(senders)
+                    if keys:
+                        typ, data = conn.uid("SEARCH", *keys)
+                    else:
+                        typ, data = conn.uid("SEARCH", "ALL")
+                    us = (data[0].split() if data[0] else [])[::-1]
+                    if us:
+                        per_folder.append((scan_folder, us))
+            else:
+                if not select_folder(folders_to_scan[0]):
+                    raise Exception(f'Папка "{folders_to_scan[0]}" не найдена. На сервере: {folder_names_hint()}')
             run_saved = set()
             def process_msg(msg):
                 nonlocal done, stop
@@ -952,28 +999,27 @@ class MainScreen(MDScreen):
                     yield seq[i:i + n]
 
             if not full:
-                keys = []
-                if since and not first_run:
-                    keys += ["SINCE", since]
-                if senders:
-                    keys += _or_from_keys(senders)
-                if keys:
-                    typ, data = conn.uid("SEARCH", *keys)
-                else:
-                    typ, data = conn.uid("SEARCH", "ALL")
-                uids = (data[0].split() if data[0] else [])[::-1]
+                total = sum(len(us) for _, us in per_folder)
                 if first_run:
                     tail = " (база пуста: вся история отправителя)"
                 elif since:
                     tail = f" (письма с {since})"
                 else:
                     tail = " (без даты, до первой известной)"
-                self.log_line(f"Проверка: писем-кандидатов {len(uids)}{tail}")
-                for uid in uids:
-                    for head, raw in fetch_uids([uid], "(RFC822)"):
-                        process_msg(email.message_from_bytes(raw))
+                self.log_line(f"Проверка: писем-кандидатов {total}{tail}")
+                for fld, us in per_folder:
+                    select_folder(fld)
+                    for uid in us:
+                        for head, raw in fetch_uids([uid], "(RFC822)"):
+                            process_msg(email.message_from_bytes(raw))
+                        if stop:
+                            break
                     if stop:
                         break
+                if done == 0 and first_run and (acc.get("folder") or "").strip():
+                    self.log_line(f"В папке «{acc['folder']}» писем не найдено. Проверьте имя папки и правила фильтрации на почте или оставьте поле пустым — буду искать во всей почте.")
+                elif done == 0 and not first_run:
+                    self.log_line("Новых писем нет.")
             else:
                 typ, data = conn.uid("SEARCH", "ALL")
                 uids = data[0].split() if data[0] else []

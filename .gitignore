@@ -11,4 +11,5 @@ main.spec
 design/
 coin.png
 make_icon_final.py
-channel.txt
+channel.txtimap_lastcheck.json
+imap_senders.json
