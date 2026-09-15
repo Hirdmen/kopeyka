@@ -81,6 +81,8 @@ jobs:
           export ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK"
           yes | "$SM" --licenses || true
           "$SM" "platforms;android-33" "build-tools;33.0.0" "platform-tools"
+          rm -rf "$SDK/tools"
+          ln -s cmdline-tools/latest "$SDK/tools"
         continue-on-error: false   
         
       - name: Build APK
