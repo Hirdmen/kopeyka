@@ -10,6 +10,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set channel flag
+        run: |
+          echo "CHANNEL = '${{ github.ref_name == 'android-test' && 'test' || 'github' }}'" > channel.py
+          cat channel.py
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -32,6 +37,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install buildozer cython
 
+      - name: Cache buildozer
+        uses: actions/cache@v4
+        with:
+          path: |
+            $HOME/.buildozer
+            .buildozer
+          key: buildozer-ubuntu-v1
+
       - name: Pre-download freetype from mirrors
         run: |
           D=.buildozer/android/platform/build-arm64-v8a/packages/freetype
@@ -53,6 +66,23 @@ jobs:
           mkdir -p ~/.android
           echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
           ls -la ~/.android
+      - name: Install Android SDK components
+        run: |
+          SDK=/home/runner/.buildozer/android/platform/android-sdk
+          mkdir -p "$SDK"
+          cd "$SDK"
+          curl -fsSL -o cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q cmdline-tools.zip
+          mv cmdline-tools latest
+          mkdir -p cmdline-tools
+          mv latest cmdline-tools/
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          chmod +x "$SM"
+          export ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK"
+          yes | "$SM" --licenses || true
+          "$SM" "platforms;android-33" "build-tools;33.0.0" "platform-tools"
+        continue-on-error: false   
+        
       - name: Build APK
         run: |
           buildozer android debug

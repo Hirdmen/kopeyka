@@ -12,7 +12,7 @@ if _platform != "android":
     Config.set("input", "mouse", "mouse,disable_multitouch")
 Config.set("graphics", "vsync", 1)
 Config.set("graphics", "maxfps", 60)
-Config.set('graphics', 'multisamples', '0')
+Config.set("graphics", "multisamples", "0")
 
 import os
 import re
@@ -29,6 +29,7 @@ import webbrowser
 import zipfile
 import urllib.request
 import urllib.error
+import re
 from kivy.uix.image import Image
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -61,6 +62,7 @@ os.environ["SSL_CERT_FILE"] = _CA_FILE
 os.environ["REQUESTS_CA_BUNDLE"] = _CA_FILE
 os.environ["SSL_CERT_DIR"] = _CA_DIR
 
+
 def _make_ssl_ctx(*args, **kwargs):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     try:
@@ -74,6 +76,7 @@ def _make_ssl_ctx(*args, **kwargs):
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.check_hostname = True
     return ctx
+
 
 ssl._create_default_https_context = _make_ssl_ctx
 
@@ -104,15 +107,125 @@ else:
 os.makedirs(DATA_DIR, exist_ok=True)
 PDF_DIR = DATA_DIR
 PAYSLIP_PREFIX = "rasch_list"
+PAYSLIP_SUBJECT_WORDS = ("расчетн", "расчётн", "зарплат", "выплат", "payroll", "payslip", "salary")
+KNOWN_SENDER_SEEDS = ("persmaster@vaz.ru",)
+
+
+def _sidecar_load(name):
+    p = os.path.join(APP_DIR, name)
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _sidecar_save(name, data):
+    with open(os.path.join(APP_DIR, name), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def _known_senders(addr):
+    return _sidecar_load("imap_senders.json").get(addr, [])
+
+
+def _known_domains(addr):
+    return [s.split("@")[-1] for s in _known_senders(addr) if "@" in s]
+
+
+def _remember_sender(addr, msg):
+    m = re.search(r"[\w.+-]+@[\w.-]+", str(msg.get("From", "")))
+    if not m:
+        return
+    s = m.group(0).lower()
+    data = _sidecar_load("imap_senders.json")
+    lst = data.setdefault(addr, [])
+    if s not in lst:
+        lst.append(s)
+        data[addr] = lst[-8:]
+        _sidecar_save("imap_senders.json", data)
+
+
+def _or_from_keys(senders):
+    keys = ["FROM", '"%s"' % senders[0]]
+    for s in senders[1:]:
+        keys = ["OR"] + keys + ["FROM", '"%s"' % s]
+    return keys
+
+
+def _checkpoint(addr):
+    return int(_sidecar_load("imap_checkpoint.json").get(addr, 0) or 0)
+
+
+def _set_checkpoint(addr, uid):
+    data = _sidecar_load("imap_checkpoint.json")
+    data[addr] = uid
+    _sidecar_save("imap_checkpoint.json", data)
+
+
+def _clear_checkpoint(addr):
+    data = _sidecar_load("imap_checkpoint.json")
+    if addr in data:
+        del data[addr]
+        _sidecar_save("imap_checkpoint.json", data)
+
+
+IMAP_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _imap_today():
+    import datetime
+    t = datetime.date.today()
+    return f"{t.day:02d}-{IMAP_MONTHS[t.month - 1]}-{t.year}"
+
+
+def _last_check(addr):
+    return _sidecar_load("imap_lastcheck.json").get(addr)
+
+
+def _set_last_check(addr):
+    data = _sidecar_load("imap_lastcheck.json")
+    data[addr] = _imap_today()
+    _sidecar_save("imap_lastcheck.json", data)
+
+
+def _auto_folder(conn):
+    try:
+        typ, dirs = conn.list()
+        if typ != "OK":
+            return None
+        for d in dirs or []:
+            txt = d.decode("ascii", "replace")
+            if "\\All" in txt:
+                if txt.rstrip().endswith('"'):
+                    return txt.rsplit('"', 2)[-2]
+                return txt.split()[-1]
+    except Exception:
+        return None
+    return None
+
+
+CONFIG = os.path.join(DATA_DIR, "config.json")
+DB_PATH = os.path.join(DATA_DIR, "salary.db")
+
+
 CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
 APP_NAME = "Расчетки"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
+try:
+    from channel import CHANNEL
+except Exception:
+    CHANNEL = None
 GITHUB_REPO = "Hirdmen/kopeyka"
 DEV_NAME = "Hirdmen"
 DEV_EMAIL = "hird78lvl@yandex.ru"
 DONATE_URL = "https://c2c.cbrpay.ru/AS1I0034FA1DBA2G8IJAPIBMBTBR13O1"
 QR_PATH = os.path.join(APP_DIR, "donate_qr.png")
+ICON_PATH = os.path.join(APP_DIR, "icon.png")
 
 # ── палитра ────────────────────────────────────────────────
 BG = (0.07, 0.08, 0.10, 1)
@@ -206,11 +319,17 @@ def save_config(cfg):
 
 # ── обновления ────────────────────────────────────────
 def _ver_tuple(s):
-    return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3])
+    """'1.0.4' или '1.0.5-test.1' -> (1, 0, 5)."""
+    base = (s or "").split("-")[0]
+    out = []
+    for p in base.split("."):
+        if p.isdigit():
+            out.append(int(p))
+    return tuple(out) or (0,)
 
 
-def github_latest_release():
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+def github_latest_release(include_pre=False):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=15"
     req = urllib.request.Request(
         url,
         headers={
@@ -218,8 +337,19 @@ def github_latest_release():
             "Accept": "application/vnd.github+json",
         },
     )
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        items = json.loads(r.read().decode("utf-8"))
+    for rel in items:
+        if rel.get("draft"):
+            continue
+        if rel.get("prerelease") and not include_pre:
+            continue
+        return rel
+    return {
+        "tag_name": "",
+        "html_url": f"https://github.com/{GITHUB_REPO}/releases",
+        "assets": [],
+    }
 
 
 # ── стиль-виджеты ──────────────────────────────────────────
@@ -381,7 +511,7 @@ def left_label(text, color=TEXT, size="14sp"):
         text=text,
         color=color,
         font_size=size,
-        markup=True,  
+        markup=True,
         halign="left",
         valign="middle",
         size_hint_y=None,
@@ -389,6 +519,7 @@ def left_label(text, color=TEXT, size="14sp"):
     lab.bind(texture_size=lambda i, v: setattr(i, "height", v[1] + dp(10)))
     lab.bind(width=lambda i, w: setattr(i, "text_size", (w, None)))
     return lab
+
 
 from kivy.uix.behaviors import ButtonBehavior
 
@@ -451,6 +582,7 @@ Google: слева «Ещё» -> «Создать ярлык» -> «Расчет
 Если не создавать папку и не указать её в настройках — поиск будет
 осуществляться по всем входящим письмам, что существенно дольше."""
 
+
 def _linkify(t):
     """Превращает http(s)-ссылки в тексте в кликабельные [ref] (markup)."""
     return re.sub(
@@ -459,29 +591,43 @@ def _linkify(t):
         t,
     )
 
+
 def show_code_card(code, name, s, h):
     """Плитка-карточка кода: полное имя, сумма, часы (если есть)."""
     hexcol = "FF6B66" if int(str(code).rstrip("П")) >= 400 else "66BB6A"
-    box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(12),
-                    size_hint_y=None)
+    box = BoxLayout(
+        orientation="vertical", spacing=dp(6), padding=dp(12), size_hint_y=None
+    )
     box.bind(minimum_height=box.setter("height"))
-    box.add_widget(left_label(
-        f"[b][size=22sp][color={hexcol}]{code}[/color][/size][/b]", TEXT, "22sp"))
-    nl = Label(text=name, color=TEXT, font_size="16sp",
-               halign="left", valign="top", size_hint_y=None)
+    box.add_widget(
+        left_label(
+            f"[b][size=22sp][color={hexcol}]{code}[/color][/size][/b]", TEXT, "22sp"
+        )
+    )
+    nl = Label(
+        text=name,
+        color=TEXT,
+        font_size="16sp",
+        halign="left",
+        valign="top",
+        size_hint_y=None,
+    )
     nl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
     nl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
     box.add_widget(nl)
     if h:
-        line = (f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
-                f"     Часы: [b][color={hexcol}]{h:.1f}[/color][/b]")
+        line = (
+            f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
+            f"     Часы: [b][color={hexcol}]{h:.1f}[/color][/b]"
+        )
     else:
         line = f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
     box.add_widget(left_label(line, TEXT, "16sp"))
     sv = ScrollView(do_scroll_y=True)
     sv.add_widget(box)
-    Popup(title="Код начисления/удержания", content=sv,
-          size_hint=(0.85, 0.45)).open()
+    Popup(title="Код начисления/удержания", content=sv, size_hint=(0.85, 0.45)).open()
+
+
 def _clamp_two_lines(lbl, full_text, max_px):
     """Вписать текст в max_px высоты (≈2 строки); не влезает — обрезать с '…'."""
     lbl.text = full_text
@@ -491,13 +637,14 @@ def _clamp_two_lines(lbl, full_text, max_px):
     lo, hi = 0, len(full_text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        lbl.text = full_text[:mid] + '…'
+        lbl.text = full_text[:mid] + "…"
         lbl.texture_update()
         if lbl.texture_size[1] <= max_px:
             lo = mid
         else:
             hi = mid - 1
-    lbl.text = full_text[:lo] + '…'
+    lbl.text = full_text[:lo] + "…"
+
 
 def password_row(initial="", hint="Пароль"):
     """Поле пароля + кнопка видимости (abc / •••)."""
@@ -604,9 +751,14 @@ class MainScreen(MDScreen):
         Clock.schedule_once(lambda dt: self.refresh_list())
 
     def log_line(self, s):
-        Clock.schedule_once(
-            lambda dt: setattr(self.log, "text", self.log.text + s + "\n")
-        )
+        if MDApp.get_running_app() is None:
+            return
+        def _put(dt):
+            try:
+                self.log.text = self.log.text + s + "\n"
+            except Exception:
+                pass
+        Clock.schedule_once(_put)
 
     def refresh_list(self):
         app = MDApp.get_running_app()
@@ -668,19 +820,26 @@ class MainScreen(MDScreen):
         popup.open()
 
     def open_help(self, *a):
-        box = BoxLayout(orientation="vertical", spacing=dp(4), padding=dp(12),
-                        size_hint_y=None)
+        box = BoxLayout(
+            orientation="vertical", spacing=dp(4), padding=dp(12), size_hint_y=None
+        )
         box.bind(minimum_height=box.setter("height"))
-        lbl = Label(text=_linkify(HELP_TEXT), color=TEXT, font_size="15sp",
-                    markup=True, halign="left", valign="top", size_hint_y=None)
+        lbl = Label(
+            text=_linkify(HELP_TEXT),
+            color=TEXT,
+            font_size="15sp",
+            markup=True,
+            halign="left",
+            valign="top",
+            size_hint_y=None,
+        )
         lbl.bind(on_ref_press=lambda i, ref: webbrowser.open(ref))
         lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
         lbl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
         box.add_widget(lbl)
         sv = ScrollView(do_scroll_y=True)
         sv.add_widget(box)
-        Popup(title="Инструкция по настройке", content=sv,
-              size_hint=(0.95, 0.9)).open()
+        Popup(title="Инструкция по настройке", content=sv, size_hint=(0.95, 0.9)).open()
 
     def go(self, name):
         self.manager.current = name
@@ -707,85 +866,211 @@ class MainScreen(MDScreen):
         server = imap_server_for(addr)
         self.log_line(f"→ Подключение к {server}...")
         conn = imaplib.IMAP4_SSL(server, 993)
-        conn.login(addr, acc["password"])
-        folder = (acc.get("folder") or "INBOX").strip()
-        try:
-            typ, _ = conn.select(_quote_folder(folder))
-        except UnicodeEncodeError:
-            self.log_line("→ Имя папки кодирую в UTF-7...")
-            typ, _ = conn.select(_quote_folder(_imap_utf7(folder)))
-        if typ != "OK":
-            _, dirs = conn.list()
-            names = []
-            for d in dirs or []:
-                txt = d.decode("ascii", "replace")
-                if '"' in txt:
-                    names.append(_from_utf7(txt.split(' "')[-2]))
-            raise Exception(f'Папка "{folder}" не найдена. На сервере: {names}')
-        since = acc.get("_since")
-        acc.pop("_since", None)  # лимит автопроверки используется один раз
-        if since and not full:
-            _, data = conn.search(None, "SINCE", since)
-        else:
-            _, data = conn.search(None, "ALL")
-        ids = (data[0].split() if data[0] else [])[::-1]
-        app = MDApp.get_running_app()
-        first_run = not storage.list_payslips(app.db, addr)
-        self.log_line(f"Писем к просмотру: {len(ids)}")
         done = 0
-        for num in ids:
-            stop = False
-            _, md = conn.fetch(num, "(RFC822)")
-            msg = email.message_from_bytes(md[0][1])
-            for part in msg.walk():
-                fname = part.get_filename()
-                if not fname:
-                    continue
-                fname = str(email.header.make_header(email.header.decode_header(fname)))
-                if not fname.lower().endswith(".pdf"):
-                    continue
-                if not fname.lower().startswith(PAYSLIP_PREFIX):
-                    continue
-                exists = storage.exists(app.db, addr, fname)
-                if exists and not full:
-                    stop = True
-                    continue
-                payload = part.get_payload(decode=True)
-                if not payload:
-                    continue
-                payload = decrypt_pdf_bytes(payload, acc.get("pdf_password") or "")
-                base = acc.get("save_dir") or PDF_DIR
-                acc_dir = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr))
-                os.makedirs(acc_dir, exist_ok=True)
-                path = os.path.join(acc_dir, fname)
-                with open(path, "wb") as f:
-                    f.write(payload)
-                self.log_line(f"Файл: {fname}")
+        stop = False
+        try:
+            conn.login(addr, acc["password"])
+            folder = (acc.get("folder") or "").strip()
+            if not folder:
+                folder = _auto_folder(conn) or "INBOX"
+                if folder == "INBOX" and not addr.lower().endswith("@gmail.com"):
+                    self.log_line("Папка не указана: обхожу все папки...")
+                    _, dirs = conn.list()
+                    skip_words = {"spam", "junk", "trash", "sent", "drafts", "archive", "архив"}
+                    folders_to_scan = []
+                    for d in dirs:
+                        line = d.decode("utf-8")
+                        match = re.match(r'\([^)]*\)\s+"(.)"\s+"(.+)"$', line)
+                        if match:
+                            fname = match.group(2)
+                            if not any(sw in fname.lower() for sw in skip_words):
+                                folders_to_scan.append(fname)
+                    if not folders_to_scan:
+                        folders_to_scan = ["INBOX"]
+                else:
+                    self.log_line(f"Папка не указана: читаю {_from_utf7(folder)}")
+                    folders_to_scan = [folder]
+            else:
+                self.log_line(f"Папка указана: читаю {folder}")
+                folders_to_scan = [folder]               
+            def select_folder(name):
                 try:
-                    text = pdf_parser.extract_text_from_pdf(
-                        path, acc.get("pdf_password")
-                    )
-                    parsed = pdf_parser.parse_payslip_text(text)
-                    if not parsed.get("period") and parsed.get("paid") is None:
-                        os.remove(path)
-                        self.log_line(f"Пропуск {fname}: не похоже на расчетку")
+                    typ, _ = conn.select(_quote_folder(name))
+                except UnicodeEncodeError:
+                    self.log_line("→ Имя папки кодирую в UTF-7...")
+                    typ, _ = conn.select(_quote_folder(_imap_utf7(name)))                    
+                return typ == "OK"
+
+            def folder_names_hint():
+                _, dirs = conn.list()
+                names = []
+                for d in dirs or []:
+                    line = d.decode("utf-8")
+                    match = re.match(r'\([^)]*\)\s+"(.)"\s+"(.+)"$', line)
+                    if match:
+                        names.append(_from_utf7(match.group(2)))
+                return names
+
+            app = MDApp.get_running_app()
+            first_run = not storage.list_payslips(app.db, addr)
+            senders = _known_senders(addr)
+            senders = list(dict.fromkeys(list(senders) + list(KNOWN_SENDER_SEEDS)))
+            since = acc.get("_since") or _last_check(addr)
+            acc.pop("_since", None)
+            per_folder = []
+            if not full:
+                for scan_folder in folders_to_scan:
+                    if not select_folder(scan_folder):
+                        if folder:
+                            raise Exception(f'Папка "{folder}" не найдена. На сервере: {folder_names_hint()}')
+                        self.log_line(f"Папка недоступна, пропускаю: {scan_folder}")
                         continue
-                    storage.save(app.db, addr, fname, parsed)
-                    done += 1
-                    self.log_line(
-                        f'OK {parsed.get("period")}: получка {parsed.get("paid")}'
-                    )
-                except Exception as e:
-                    self.log_line(f"Внимание, ошибка разбора {fname}: {e}")
-                if not full and first_run:
-                    stop = True
-                    break
-                if not full and first_run:
-                    stop = True
-                    break
-            if stop:
-                break
-        conn.logout()
+                    keys = []
+                    if since and not first_run:
+                        keys += ["SINCE", since]
+                    if senders:
+                        keys += _or_from_keys(senders)
+                    if keys:
+                        typ, data = conn.uid("SEARCH", *keys)
+                    else:
+                        typ, data = conn.uid("SEARCH", "ALL")
+                    us = (data[0].split() if data[0] else [])[::-1]
+                    if us:
+                        per_folder.append((scan_folder, us))
+            else:
+                if not select_folder(folders_to_scan[0]):
+                    raise Exception(f'Папка "{folders_to_scan[0]}" не найдена. На сервере: {folder_names_hint()}')
+            run_saved = set()
+            def process_msg(msg):
+                nonlocal done, stop
+                for part in msg.walk():
+                    fname = part.get_filename()
+                    if not fname:
+                        continue
+                    fname = str(email.header.make_header(email.header.decode_header(fname)))
+                    if not fname.lower().endswith(".pdf"):
+                        continue
+                    if not fname.lower().startswith(PAYSLIP_PREFIX):
+                        continue
+                    if fname in run_saved:
+                        continue
+                    if storage.exists(app.db, addr, fname) and not full:
+                        stop = True
+                        continue
+                    payload = part.get_payload(decode=True)
+                    if not payload:
+                        continue
+                    payload = decrypt_pdf_bytes(payload, acc.get("pdf_password") or "")
+                    base = acc.get("save_dir") or PDF_DIR
+                    acc_dir = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr))
+                    os.makedirs(acc_dir, exist_ok=True)
+                    path = os.path.join(acc_dir, fname)
+                    with open(path, "wb") as f:
+                        f.write(payload)
+                    self.log_line(f"Файл: {fname}")
+                    try:
+                        text = pdf_parser.extract_text_from_pdf(path, acc.get("pdf_password"))
+                        parsed = pdf_parser.parse_payslip_text(text)
+                        if not parsed.get("period") and parsed.get("paid") is None:
+                            os.remove(path)
+                            self.log_line(f"Пропуск {fname}: не похоже на расчетку")
+                            continue
+                        storage.save(app.db, addr, fname, parsed)
+                        run_saved.add(fname)
+                        done += 1
+                        _remember_sender(addr, msg)
+                        self.log_line(f'OK {parsed.get("period")}: получка {parsed.get("paid")}')
+                    except Exception as e:
+                        self.log_line(f"Внимание, ошибка разбора {fname}: {e}")
+                    
+            def fetch_uids(uids, what):
+                rng = b",".join(uids)
+                typ, resp = conn.uid("FETCH", rng, what)
+                if typ != "OK":
+                    raise Exception("IMAP: ошибка выборки пачки")
+                out = []
+                for item in resp:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        out.append((item[0], item[1]))
+                return out
+
+            def chunks(seq, n):
+                for i in range(0, len(seq), n):
+                    yield seq[i:i + n]
+
+            if not full:
+                total = sum(len(us) for _, us in per_folder)
+                if first_run:
+                    tail = " (база пуста: вся история отправителя)"
+                elif since:
+                    tail = f" (письма с {since})"
+                else:
+                    tail = " (без даты, до первой известной)"
+                self.log_line(f"Проверка: писем-кандидатов {total}{tail}")
+                for fld, us in per_folder:
+                    select_folder(fld)
+                    for uid in us:
+                        for head, raw in fetch_uids([uid], "(RFC822)"):
+                            process_msg(email.message_from_bytes(raw))
+                        if stop:
+                            break
+                    if stop:
+                        break
+                if done == 0 and first_run and (acc.get("folder") or "").strip():
+                    self.log_line(f"В папке «{acc['folder']}» писем не найдено. Проверьте имя папки и правила фильтрации на почте или оставьте поле пустым — буду искать во всей почте.")
+                elif done == 0 and not first_run:
+                    self.log_line("Новых писем нет.")
+            else:
+                typ, data = conn.uid("SEARCH", "ALL")
+                uids = data[0].split() if data[0] else []
+                
+                self.log_line(f"Полный скан: писем {len(uids)}, смотрю заголовки…")
+                cand = []
+                seen = 0
+                for ch in chunks(uids, 400):
+                    for head, raw in fetch_uids(ch, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])"):
+                        m = re.search(rb"UID (\d+)", head)
+                        if not m:
+                            continue
+                        h = email.message_from_bytes(raw)
+                        subj = str(email.header.make_header(email.header.decode_header(h.get("Subject") or ""))).lower()
+                        frm = str(h.get("From", "")).lower()
+                        if (any(w in subj or w in frm for w in PAYSLIP_SUBJECT_WORDS)
+                                or any(s in frm for s in senders)
+                                or any(d in frm for d in _known_domains(addr))):
+                            cand.append(m.group(1))
+                    seen += len(ch)
+                    self.log_line(f"  заголовки: {seen}/{len(uids)}, кандидатов: {len(cand)}")        
+                self.log_line(f"Кандидатов на полную загрузку: {len(cand)}")
+                if cand or senders:
+                    for ch in chunks(cand, 10):
+                        for head, raw in fetch_uids(ch, "(RFC822)"):
+                            process_msg(email.message_from_bytes(raw))
+                        if stop:
+                            break
+                    _clear_checkpoint(addr)
+                else:
+                    ck = _checkpoint(addr)
+                    if ck:
+                        uids = [u for u in uids if int(u) > ck]
+                        self.log_line(f"Кандидатов нет; продолжаю сплошной скан с чекпоинта: осталось {len(uids)}")
+                    total = len(uids)
+                    for i, ch in enumerate(chunks(uids, 20), 1):
+                        self.log_line(f"  пачка {i}/{(total + 19) // 20}: {len(ch)} писем")
+                        for head, raw in fetch_uids(ch, "(RFC822)"):
+                            process_msg(email.message_from_bytes(raw))
+                        _set_checkpoint(addr, int(ch[-1]))
+                        if stop:
+                            break
+                    if not stop:
+                        _clear_checkpoint(addr)
+            if done > 0:
+                _set_last_check(addr)
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
         self.log_line(f"Готово. Обработано расчеток: {done}")
 
 
@@ -910,7 +1195,7 @@ class DetailScreen(MDScreen):
             lbl1.bind(size=lbl1.setter("text_size"))
 
             # название: перенос до 2 строк, длинное обрезается
-                       # название: максимум 2 строки, излишек — «…» справа
+            # название: максимум 2 строки, излишек — «…» справа
             lbl2 = Label(
                 text=name,
                 color=col,
@@ -922,10 +1207,11 @@ class DetailScreen(MDScreen):
 
             def _refit(i, v, lbl=lbl2, full=name):
                 lbl.text_size = (v[0], None)
-                lbl.text = 'Проба'
+                lbl.text = "Проба"
                 lbl.texture_update()
                 one = lbl.texture_size[1]
                 _clamp_two_lines(lbl, full, one * 2 + dp(4))
+
             lbl2.bind(size=_refit)
 
             hours_text = f"{h:.1f}" if h else ""
@@ -956,8 +1242,11 @@ class DetailScreen(MDScreen):
             row.add_widget(lbl2)
             row.add_widget(lbl3)
             row.add_widget(lbl4)
-            row.bind(on_release=lambda *a, c=code, n=name, ss=s, hh=h:
-                     show_code_card(c, n, ss, hh))
+            row.bind(
+                on_release=lambda *a, c=code, n=name, ss=s, hh=h: show_code_card(
+                    c, n, ss, hh
+                )
+            )
             codes.add_widget(row)
         self.box.add_widget(codes)
 
@@ -991,8 +1280,8 @@ class AccountForm(Card):
 
         self.add_widget(left_label("ПАПКА НА ПОЧТЕ · IMAP", DIM, "12sp"))
         self.f_folder = MDTextField(
-            hint_text="Папка на почте (INBOX)",
-            text=d.get("folder", "INBOX"),
+            hint_text="Папка на почте (пусто = авто)",
+            text=d.get("folder", ""),
             size_hint_y=None,
             height=dp(62),
         )
@@ -1028,7 +1317,7 @@ class AccountForm(Card):
             "email": self.f_email.text.strip(),
             "password": self.f_pass.text,
             "pdf_password": self.f_pdf.text,
-            "folder": self.f_folder.text.strip() or "INBOX",
+            "folder": self.f_folder.text.strip(),
             "save_dir": self.f_save.text.strip(),
         }
 
@@ -1139,7 +1428,6 @@ class CodesScreen(MDScreen):
         )
         self._last_q = self.search_field.text
         self._render(self.search_field.text)
-        
 
     def _render(self, q=""):
         self.box.clear_widgets()
@@ -1197,7 +1485,9 @@ class CodesScreen(MDScreen):
         # за всё время: П-перерасчеты считаем вместе с базовым кодом
         n = app.db.execute(
             "SELECT COUNT(DISTINCT payslip_id) FROM payslip_codes "
-            "WHERE code = ? OR code = ? || 'П'", (code, code)).fetchone()[0]
+            "WHERE code = ? OR code = ? || 'П'",
+            (code, code),
+        ).fetchone()[0]
         box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
         box.add_widget(
             left_label(
@@ -1331,37 +1621,62 @@ class AboutScreen(MDScreen):
 
     def _update_worker(self):
         try:
-            rel = github_latest_release()
+            from kivy.utils import platform as _pf
+
+            is_android = _pf == "android"
+
+            channel = CHANNEL or ("test" if is_android else "github")
+            self._status(f"Канал: {channel}, проверяю GitHub…")
+            rel = github_latest_release(include_pre=(channel == "test"))
             tag = (rel.get("tag_name") or "").lstrip("v")
             page = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
-            if _ver_tuple(tag) <= _ver_tuple(APP_VERSION):
+
+            if not tag or _ver_tuple(tag) <= _ver_tuple(APP_VERSION):
                 self._status(f"У вас последняя версия: v{APP_VERSION}.")
                 return
+
+            if channel == "rustore":
+                url = "https://www.rustore.ru/catalog/app/TODO_PACKAGE"
+                self._status(f"Доступна v{tag}! Обновите в RuStore.")
+                if is_android:
+                    try:
+                        from jnius import autoclass  # type: ignore
+
+                        Intent = autoclass("android.content.Intent")
+                        Uri = autoclass("android.net.Uri")
+                        act = autoclass("org.kivy.android.PythonActivity").mActivity
+                        act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    except Exception:
+                        webbrowser.open(url)
+                else:
+                    webbrowser.open(url)
+                return
+
+            ext = ".apk" if is_android else ".zip"
             asset = next(
-                (
-                    a
-                    for a in rel.get("assets", [])
-                    if a["name"].lower().endswith(".zip")
-                ),
+                (a for a in rel.get("assets", []) if a["name"].lower().endswith(ext)),
                 None,
             )
-            if not getattr(sys, "frozen", False) or not asset:
+            if not is_android and not getattr(sys, "frozen", False):
                 self._status(
-                    f"Доступна v{tag}! Автообновление — в собранной "
-                    f"версии; открываю страницу релиза…"
+                    f"Доступна v{tag}! Автообновление — в собранной версии; "
+                    f"открываю страницу релиза…"
                 )
                 webbrowser.open(page)
                 return
+            if not asset:
+                self._status(f"Доступна v{tag}! Открываю страницу релиза…")
+                webbrowser.open(page)
+                return
+
             self._status(f"Качаю v{tag}…")
-            zip_path = os.path.join(tempfile.gettempdir(), asset["name"])
-            urllib.request.urlretrieve(asset["browser_download_url"], zip_path)
-            self._status("Распаковываю…")
-            staging = os.path.join(tempfile.gettempdir(), "kopeyka_update")
-            if os.path.isdir(staging):
-                shutil.rmtree(staging)
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(staging)
-            self._apply_update(staging)
+            file_path = os.path.join(tempfile.gettempdir(), asset["name"])
+            urllib.request.urlretrieve(asset["browser_download_url"], file_path)
+
+            if is_android:
+                self._install_apk(file_path)
+            else:
+                self._apply_update_windows(file_path)
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 self._status("Обновлений не найдено — у вас актуальная версия.")
@@ -1372,7 +1687,100 @@ class AboutScreen(MDScreen):
         finally:
             Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
 
-    def _apply_update(self, staging):
+    def _publish_to_downloads(self, src_path, mime="application/vnd.android.package-archive"):
+        """Публикует файл в Загрузки/Kopeyka через MediaStore (Android 10+)."""
+        from jnius import autoclass  # type: ignore
+        ContentValues = autoclass("android.content.ContentValues")
+        Downloads = autoclass("android.provider.MediaStore$Downloads")
+        Environment = autoclass("android.os.Environment")
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        values = ContentValues()
+        values.put("_display_name", os.path.basename(src_path))
+        values.put("mime_type", mime)
+        values.put("relative_path", Environment.DIRECTORY_DOWNLOADS + "/Kopeyka")
+        resolver = activity.getContentResolver()
+        uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values)
+        if uri is None:
+            return None
+        out = resolver.openOutputStream(uri)
+        try:
+            with open(src_path, "rb") as f:
+                out.write(f.read())
+        finally:
+            out.close()
+        return uri
+
+    def _install_apk(self, apk_path):
+        """Установка APK через системный установщик Android."""
+        from jnius import autoclass  # type: ignore
+        Intent = autoclass("android.content.Intent")
+        Uri = autoclass("android.net.Uri")
+        File = autoclass("java.io.File")
+        BuildVersion = autoclass("android.os.Build$VERSION")
+        PackageManager = autoclass("android.content.pm.PackageManager")
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+
+        if BuildVersion.SDK_INT >= 26 and not activity.getPackageManager().canRequestPackageInstalls():
+            self._status("Разреши установку из этого источника в настройках…")
+            intent = Intent(
+                "android.settings.MANAGE_UNKNOWN_APP_SOURCES",
+                Uri.parse("package:" + activity.getPackageName()),
+            )
+            activity.startActivity(intent)
+            return
+
+        uri = None
+        try:
+            info = activity.getPackageManager().getPackageInfo(
+                activity.getPackageName(), PackageManager.GET_PROVIDERS)
+            for p in (info.providers or []):
+                if p.name and "FileProvider" in p.name and p.authority:
+                    fp = autoclass("androidx.core.content.FileProvider")
+                    uri = fp.getUriForFile(activity, p.authority.split(";")[0], File(apk_path))
+                    break
+        except Exception:
+            uri = None
+        if uri is None and BuildVersion.SDK_INT >= 29:
+            uri = self._publish_to_downloads(apk_path)
+        if uri is None:
+            self._status("Ошибка обновления: не удалось передать APK установщику.")
+            return
+
+        intent = Intent(Intent.ACTION_VIEW)
+        intent.setDataAndType(uri, "application/vnd.android.package-archive")
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        self._status("Открываю установщик…")
+        activity.startActivity(intent)
+        return
+
+        # Копируем APK в публичную папку (Downloads)
+        import shutil
+
+        downloads = os.path.join(os.path.expanduser("~"), "Download")
+        apk_name = os.path.basename(apk_path)
+        public_apk = os.path.join(downloads, apk_name)
+        shutil.copy2(apk_path, public_apk)
+
+        # Открываем установщик
+        intent = Intent(Intent.ACTION_VIEW)
+        intent.setDataAndType(
+            Uri.fromFile(File(public_apk)), "application/vnd.android.package-archive"
+        )
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        self._status("Открываю установщик…")
+        activity.startActivity(intent)
+
+    def _apply_update_windows(self, zip_path):
+        """Применение обновления для Windows (старая логика)"""
+        self._status("Распаковываю…")
+        staging = os.path.join(tempfile.gettempdir(), "kopeyka_update")
+        if os.path.isdir(staging):
+            shutil.rmtree(staging)
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(staging)
+
         app_dir = os.path.dirname(sys.executable)
         exe = sys.executable
         ps1 = os.path.join(tempfile.gettempdir(), "kopeyka_update.ps1")
@@ -1405,12 +1813,15 @@ class SalaryApp(MDApp):
     current_detail = None
 
     def build(self):
+        self.title = "Копейка"
         self.theme_cls.theme_style = "Dark"
         self.theme_cls.primary_palette = "Green"
         self.theme_cls.ripple_scale = 0
         self.theme_cls.ripple_duration_out = 0
         self.theme_cls.ripple_duration_in = 0
         Window.clearcolor = BG
+        if _platform != "android" and os.path.exists(ICON_PATH):
+            Window.set_icon(ICON_PATH)
         self.theme_cls.ripple_scale = 0
         self.db = storage.connect(DB_PATH)
         self.cfg = load_config()
@@ -1458,6 +1869,7 @@ class SalaryApp(MDApp):
     def on_resume(self):
         """Android: после возврата из фона текстуры могут быть пустыми —
         принудительно пересоздаём их у всех Label/кнопок."""
+
         def _fix(dt):
             try:
                 for root_w in list(Window.children):
@@ -1467,11 +1879,9 @@ class SalaryApp(MDApp):
                 Window.ask_update()
             except Exception as e:
                 print("[kopeyka] on_resume fix failed:", e)
+
         Clock.schedule_once(_fix, 0.3)
 
-
-if __name__ == "__main__":
-    SalaryApp().run()
 
 if __name__ == "__main__":
     SalaryApp().run()
