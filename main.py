@@ -468,6 +468,44 @@ class IconButton(Button):
         self.background_color = (0, 0, 0, 0)
 
 
+
+# --- НОВЫЙ ВИДЖЕТ: плитка-счётчик (не кликабельная) ---
+class InfoTile(BoxLayout):
+    """Информационная плитка: заголовок + счётчик. Не кликабельна."""
+    def __init__(self, text, **kw):
+        super().__init__(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=dp(56),
+            padding=[dp(12), dp(8)],
+            spacing=dp(8),
+            **kw,
+        )
+        with self.canvas.before:
+            Color(*CARD)
+            self._r = RoundedRectangle(
+                pos=self.pos, size=self.size, radius=[(dp(12), dp(12))] * 4
+            )
+        self.bind(pos=self._s, size=self._s)
+        self.lbl = Label(
+            text=text,
+            color=TEXT,
+            font_size="16sp",
+            bold=True,
+            markup=True,
+            halign="left",
+            valign="middle",
+        )
+        self.lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        self.add_widget(self.lbl)
+
+    def _s(self, *a):
+        self._r.pos = self.pos
+        self._r.size = self.size
+
+    def update_text(self, text):
+        self.lbl.text = text
+
 class TopBar(BoxLayout):
     def __init__(self, title, back_cb=None, menu_cb=None, **kw):
         super().__init__(
@@ -705,36 +743,56 @@ class MainScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
-        root.add_widget(TopBar("Расчетки", menu_cb=self.open_menu))
-        self.acc_btn = CardButton(
-            text="Выбрать почту…", size_hint_y=None, height=dp(48)
-        )
-        self.acc_btn.bind(on_release=self.open_accounts)
-        root.add_widget(self.acc_btn)
-        row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
-        b1 = AccentButton(text="Проверить")
-        b1.bind(on_release=lambda *a: self.check_mail(False))
-        b2 = AccentButton(text="Скачать всё (1-й запуск)")
-        b2.bind(on_release=lambda *a: self.check_mail(True))
-        row.add_widget(b1)
-        row.add_widget(b2)
-        root.add_widget(row)
+        
+        # Верхняя строка: плитка + кнопка Меню
+        top_row = BoxLayout(size_hint_y=None, height=dp(56), spacing=dp(6))
+        self.info_tile = InfoTile("РАСЧЕТКИ — загрузка…")
+        top_row.add_widget(self.info_tile)
+        menu_btn = AccentButton(text="Меню", size_hint_x=None, width=dp(90))
+        menu_btn.bind(on_release=self.open_menu)
+        top_row.add_widget(menu_btn)
+        root.add_widget(top_row)
+        
+        # Список расчеток (основное пространство)
         self.list_box = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
         self.list_box.bind(minimum_height=self.list_box.setter("height"))
         sv = ScrollView(do_scroll_y=True)
         sv.add_widget(self.list_box)
         root.add_widget(sv)
+        
+        # Нижний ряд: Проверить + Почта (переключатель ящика)
+        bottom_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        check_btn = AccentButton(text="Проверить", size_hint_x=0.7)
+        check_btn.bind(on_release=lambda *a: self.check_mail(False))
+        bottom_row.add_widget(check_btn)
+        self.acc_btn = CardButton(
+            text="Выбрать почту…", size_hint_x=0.3, height=dp(48)
+        )
+        self.acc_btn.bind(on_release=self.open_accounts)
+        bottom_row.add_widget(self.acc_btn)
+        root.add_widget(bottom_row)
+        
+        # Сворачиваемый журнал (по умолчанию скрыт)
+        self.log_expanded = False
+        self.log_toggle = CardButton(
+            text="▶ Журнал (0)", size_hint_y=None, height=dp(36)
+        )
+        self.log_toggle.bind(on_release=self.toggle_log)
+        root.add_widget(self.log_toggle)
+        
         self.log = TextInput(
             readonly=True,
             size_hint_y=None,
-            height=dp(110),
+            height=dp(0),  # скрыт по умолчанию
             font_size="12sp",
             background_color=BG,
             foreground_color=GREEN,
         )
         root.add_widget(self.log)
+        
         self.add_widget(root)
         self.current_acc = None
+        self.log_lines = []  # только текущая сессия
 
     def on_enter(self):
         accs = [a["email"] for a in MDApp.get_running_app().cfg["accounts"]]
@@ -744,6 +802,130 @@ class MainScreen(MDScreen):
             f"[b]{self.current_acc}[/b]" if self.current_acc else "Выбрать почту…"
         )
         self.refresh_list()
+
+    def update_tile(self):
+        """Обновляет плитку-счётчик: количество и период."""
+        app = MDApp.get_running_app()
+        rows = storage.list_payslips(app.db, self.current_acc)
+        count = len(rows)
+        if count == 0:
+            self.info_tile.update_text("РАСЧЕТКИ — пока пусто, нажмите «Проверить»")
+        else:
+            # Периоды в базе хранятся как 'месяц год' (например, 'август 2025')
+            # Собираем пары (объект_даты, исходная_строка) для правильной сортировки
+            from datetime import datetime
+            months_ru_map = {
+                "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+                "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+                # На всякий случай добавим именительный падеж, если где-то встречается
+                "январь": 1, "февраль": 2, "март": 3, "апрель": 4, "май": 5, "июнь": 6,
+                "июль": 7, "август": 8, "сентябрь": 9, "октябрь": 10, "ноябрь": 11, "декабрь": 12,
+            }
+            
+            parsed_periods = []
+            for r in rows:
+                period_str = r[1]
+                if not period_str:
+                    continue
+                try:
+                    parts = period_str.strip().split()
+                    if len(parts) >= 2:
+                        month_name = parts[0].lower()
+                        year = int(parts[1])
+                        month_num = months_ru_map.get(month_name)
+                        if month_num:
+                            dt = datetime(year, month_num, 1)
+                            parsed_periods.append((dt, period_str))
+                except Exception:
+                    pass
+            
+            if parsed_periods:
+                # Сортируем по дате (от старых к новым) и берём самую первую
+                parsed_periods.sort(key=lambda x: x[0])
+                earliest_str = parsed_periods[0][1]
+                # Форматируем красиво: 'октябрь 2024' -> 'октября 2024'
+                try:
+                    parts = earliest_str.strip().split()
+                    month_name = parts[0].lower()
+                    year = int(parts[1])
+                    # Приводим к родительному падежу для красоты
+                    months_ru_genitive = ["января", "февраля", "марта", "апреля", "мая", "июня",
+                                          "июля", "августа", "сентября", "октября", "ноября", "декабря"]
+                    # Определяем номер месяца из исходного названия
+                    month_num = months_ru_map.get(month_name, 1)
+                    period_str = f"{months_ru_genitive[month_num - 1]} {year}"
+                except Exception:
+                    period_str = earliest_str
+            else:
+                period_str = "—"
+            
+            self.info_tile.update_text(f"РАСЧЕТКИ — {count} шт. с {period_str}")
+
+    def toggle_log(self, *a):
+        """Разворачивает/сворачивает журнал."""
+        self.log_expanded = not self.log_expanded
+        if self.log_expanded:
+            self.log.height = dp(110)
+            self.log_toggle.text = f"▼ Журнал ({len(self.log_lines)})"
+        else:
+            self.log.height = dp(0)
+            self.log_toggle.text = f"▶ Журнал ({len(self.log_lines)})"
+
+    def open_log_full(self, *a):
+        """Полный экран журнала с кнопкой копирования."""
+        box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(12))
+        lbl = Label(
+            text="\n".join(self.log_lines) if self.log_lines else "Журнал пуст (текущая сессия).",
+            color=TEXT,
+            font_size="14sp",
+            halign="left",
+            valign="top",
+            size_hint_y=None,
+        )
+        lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        lbl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
+        sv = ScrollView(do_scroll_y=True)
+        sv.add_widget(lbl)
+        box.add_widget(sv)
+        
+        btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        copy_btn = AccentButton(text="Копировать всё")
+        def do_copy(*a):
+            from kivy.core.clipboard import Clipboard
+            Clipboard.copy("\n".join(self.log_lines))
+            copy_btn.text = "Скопировано!"
+            Clock.schedule_once(lambda dt: setattr(copy_btn, "text", "Копировать всё"), 2)
+        copy_btn.bind(on_release=do_copy)
+        btn_row.add_widget(copy_btn)
+        close_btn = AccentButton(text="Закрыть")
+        popup = Popup(title="Журнал сессии", content=box, size_hint=(0.95, 0.85))
+        close_btn.bind(on_release=popup.dismiss)
+        btn_row.add_widget(close_btn)
+        box.add_widget(btn_row)
+        popup.open()
+
+    def confirm_reparse(self, *a):
+        """Подтверждение перескачивания (полная проверка)."""
+        box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        box.add_widget(Label(
+            text="Заново пройти всю историю почты?\nОперация долгая, уже скачанное не дублируется.",
+            color=TEXT,
+            font_size="16sp",
+            halign="center",
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        yes_btn = AccentButton(text="Да, перескачать")
+        no_btn = AccentButton(text="Отмена")
+        popup = Popup(title="Перескачать расчетки", content=box, size_hint=(0.8, 0.4))
+        def do_yes(*a):
+            popup.dismiss()
+            self.check_mail(True)
+        yes_btn.bind(on_release=do_yes)
+        no_btn.bind(on_release=popup.dismiss)
+        btn_row.add_widget(yes_btn)
+        btn_row.add_widget(no_btn)
+        box.add_widget(btn_row)
+        popup.open()
 
     def reparse_pdfs(self, *a):
         self.log_line("→ Переразбираю архив PDF по текущим правилам…")
@@ -773,11 +955,15 @@ class MainScreen(MDScreen):
         Clock.schedule_once(lambda dt: self.refresh_list())
 
     def log_line(self, s):
+        """Добавляет строку в журнал (только текущая сессия)."""
         if MDApp.get_running_app() is None:
             return
         def _put(dt):
             try:
-                self.log.text = self.log.text + s + "\n"
+                self.log_lines.append(s)
+                self.log.text = "\n".join(self.log_lines)
+                prefix = "▼" if self.log_expanded else "▶"
+                self.log_toggle.text = f"{prefix} Журнал ({len(self.log_lines)})"
             except Exception:
                 pass
         Clock.schedule_once(_put)
@@ -800,7 +986,7 @@ class MainScreen(MDScreen):
             )
             b.bind(on_release=lambda *a, p=pid: self.open_detail(p))
             self.list_box.add_widget(b)
-
+        self.update_tile()
     def open_detail(self, pid):
         MDApp.get_running_app().current_detail = pid
         self.manager.current = "detail"
@@ -826,19 +1012,69 @@ class MainScreen(MDScreen):
         self.refresh_list()
 
     def open_menu(self, *a):
-        box = GridLayout(cols=1, size_hint_y=None, spacing=dp(6), padding=dp(6))
-        box.bind(minimum_height=box.setter("height"))
-        popup = Popup(title="Меню", content=box, size_hint=(0.9, 0.6))
-        for txt, cb in (
-            ("Настройки почты", lambda: self.go("settings")),
-            ("Инструкция по настройке", self.open_help),
-            ("Справочник кодов АВТОВАЗ", lambda: self.go("codes")),
-            ("О программе", lambda: self.go("about")),
-            ("Переразобрать PDF", self.reparse_pdfs),
-        ):
-            b = AccentButton(text=txt, size_hint_y=None, height=dp(48))
-            b.bind(on_release=lambda *a, c=cb: (c(), popup.dismiss()))
-            box.add_widget(b)
+        # Контейнер для всего содержимого меню
+        root_box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
+        
+        # ScrollView, чтобы на маленьких экранах меню прокручивалось
+        content_box = GridLayout(cols=1, size_hint_y=None, spacing=dp(4), padding=[0, 0, 0, 0])
+        content_box.bind(minimum_height=content_box.setter("height"))
+        
+        sv = ScrollView(do_scroll_y=True, size_hint_y=1)
+        sv.add_widget(content_box)
+        root_box.add_widget(sv)
+
+        # Вспомогательная функция для добавления заголовка блока
+        def add_header(text):
+            lbl = Label(
+                text=text,
+                color=DIM,
+                font_size="12sp",
+                bold=True,
+                halign="left",
+                size_hint_y=None,
+                height=dp(24),
+            )
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+            content_box.add_widget(lbl)
+
+        # Вспомогательная функция для добавления разделителя
+        def add_separator():
+            sep_box = BoxLayout(size_hint_y=None, height=dp(10))
+            from kivy.graphics import Color, Rectangle
+            with sep_box.canvas:
+                Color(*DIM, 0.3)  # полупрозрачный серый
+                Rectangle(pos=sep_box.pos, size=(sep_box.width, dp(1)))
+            sep_box.bind(pos=lambda i, v: setattr(i.canvas.children[-1], 'pos', v))
+            sep_box.bind(size=lambda i, v: setattr(i.canvas.children[-1], 'size', (v[0], dp(1))))
+            content_box.add_widget(sep_box)
+
+        # Вспомогательная функция для добавления кнопки
+        def add_button(text, callback):
+            b = AccentButton(text=text, size_hint_y=None, height=dp(48))
+            b.bind(on_release=lambda *a, c=callback: (c(), popup.dismiss()))
+            content_box.add_widget(b)
+
+        # --- БЛОК 1: ОСНОВНОЕ ---
+        add_header("ОСНОВНОЕ")
+        add_button("Настройки", lambda: self.go("settings"))
+        
+        add_separator()
+        
+        # --- БЛОК 2: ИНФОРМАЦИЯ ---
+        add_header("ИНФОРМАЦИЯ")
+        add_button("Инструкция по настройке", self.open_help)
+        add_button("Справочник кодов АВТОВАЗ", lambda: self.go("codes"))
+        add_button("О программе", lambda: self.go("about"))
+        
+        add_separator()
+        
+        # --- БЛОК 3: СЕРВИС ---
+        add_header("СЕРВИС")
+        add_button("Перескачать расчетки", self.confirm_reparse)
+        add_button("Переразобрать PDF", self.reparse_pdfs)
+        add_button("Журнал", self.open_log_full)
+
+        popup = Popup(title="Меню", content=root_box, size_hint=(0.9, 0.75))
         popup.open()
 
     def open_help(self, *a):
@@ -1094,12 +1330,16 @@ class MainScreen(MDScreen):
             except Exception:
                 pass
         self.log_line(f"Готово. Обработано расчеток: {done}")
+        MDApp.get_running_app().sm.get_screen("about").sync_pdf_to_downloads()
 
 
 class DetailScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.bar = TopBar("Расчетка", back_cb=self.back)
+        self.pdf_btn = AccentButton(text="PDF", size_hint_x=None, width=dp(64))
+        self.pdf_btn.bind(on_release=self.open_pdf)
+        self.bar.add_widget(self.pdf_btn)
         self.box = GridLayout(cols=1, size_hint_y=None, spacing=dp(8), padding=dp(6))
         self.box.bind(minimum_height=self.box.setter("height"))
         sv = ScrollView(do_scroll_y=True)
@@ -1111,6 +1351,79 @@ class DetailScreen(MDScreen):
 
     def back(self, *a):
         self.manager.current = "main"
+
+    def open_pdf(self, *a):
+        """Открывает оригинал PDF: ПК — системным просмотрщиком,
+        Android — копию из Загрузки/Kopeyka."""
+        import glob
+        app = MDApp.get_running_app()
+        d = storage.get(app.db, app.current_detail)
+        if not d:
+            return
+        email = d.get("email") or ""
+        fname = d.get("filename") or ""
+        if not fname:
+            self._pdf_missing()
+            return
+        acc = next((x for x in app.cfg["accounts"] if x["email"] == email), None)
+        base = (acc.get("save_dir") if acc else "") or PDF_DIR
+        cands = [os.path.join(base, re.sub(r"[^\w.@-]", "_", email), fname),
+                 os.path.join(base, fname)]
+        cands += glob.glob(os.path.join(base, "*", fname))
+        path = next((p for p in cands if os.path.exists(p)), None)
+        if not path:
+            self._pdf_missing()
+            return
+        if _platform == "android":
+            self._open_pdf_android(app, path)
+        else:
+            try:
+                os.startfile(path)  # noqa
+            except Exception:
+                self._pdf_missing()
+
+    def _open_pdf_android(self, app, path):
+        """Android: открывает копию из Загрузки/Kopeyka системным просмотрщиком."""
+        from jnius import autoclass  # type: ignore
+        try:
+            Intent = autoclass("android.content.Intent")
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            uri = self.manager.get_screen("about").publish_if_missing(path)
+            if uri is None:
+                self._pdf_missing()
+                return
+            intent = Intent(Intent.ACTION_VIEW)
+            intent.setDataAndType(uri, "application/pdf")
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            activity.startActivity(intent)
+        except Exception:
+            self._pdf_missing()
+
+    def _pdf_missing(self, err=""):
+        """Файла нет на диске или нечем открыть: предложение перескачать."""
+        box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        box.add_widget(Label(
+            text="Файл расчетки не найден на диске"
+                 + (f": {err}" if err else "")
+                 + "\nПерескачать почту?",
+            color=TEXT, font_size="15sp", halign="center",
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        popup = Popup(title="PDF", content=box, size_hint=(0.85, 0.35))
+        yes = AccentButton(text="Проверить почту")
+        no = AccentButton(text="Закрыть")
+        def do_yes(*a):
+            popup.dismiss()
+            self.manager.get_screen("main").check_mail(False)
+            self.manager.current = "main"
+        yes.bind(on_release=do_yes)
+        no.bind(on_release=popup.dismiss)
+        btn_row.add_widget(yes)
+        btn_row.add_widget(no)
+        box.add_widget(btn_row)
+        popup.open()
+
 
     def on_enter(self):
         app = MDApp.get_running_app()
@@ -1732,6 +2045,55 @@ class AboutScreen(MDScreen):
             out.close()
         return uri
 
+    # MIGRATION-SYNC: временная синхронизация для миграции 1.0.4 -> 1.0.5.
+    # Удалить вместе с вызовом в build(), начиная с версии 1.0.7+.
+    def _uri_in_downloads(self, fname):
+        """Android: content-URI копии в Загрузки/Kopeyka или None."""
+        from jnius import autoclass  # type: ignore
+        Downloads = autoclass("android.provider.MediaStore$Downloads")
+        Uri = autoclass("android.net.Uri")
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        resolver = activity.getContentResolver()
+        cur = resolver.query(
+            Downloads.EXTERNAL_CONTENT_URI, ["_id"], "_display_name=?", [fname], None
+        )
+        uri = None
+        if cur is not None:
+            if cur.moveToFirst():
+                uri = Uri.withAppendedPath(
+                    Downloads.EXTERNAL_CONTENT_URI, str(cur.getLong(0))
+                )
+            cur.close()
+        return uri
+
+    def publish_if_missing(self, path):
+        """Android: content-URI копии; публикует её, если копии ещё нет."""
+        uri = self._uri_in_downloads(os.path.basename(path))
+        if uri is None:
+            uri = self._publish_to_downloads(path, mime="application/pdf")
+        return uri
+
+    def sync_pdf_to_downloads(self):
+        """Android: допубликовывает копии всех расчеток в Загрузки/Kopeyka."""
+        if _platform != "android":
+            return 0
+        published = 0
+        rows = self.db.execute("SELECT email, filename FROM payslips").fetchall()
+        for addr, fname in rows:
+            acc = next((x for x in self.cfg["accounts"] if x["email"] == addr), None)
+            base = (acc.get("save_dir") if acc else "") or PDF_DIR
+            path = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr), fname)
+            if not os.path.exists(path):
+                continue
+            try:
+                if self._uri_in_downloads(fname) is None:
+                    if self._publish_to_downloads(path, mime="application/pdf"):
+                        published += 1
+            except Exception:
+                continue
+        return published
+
+
     def _install_apk(self, apk_path):
         """Установка APK через системный установщик Android."""
         from jnius import autoclass  # type: ignore
@@ -1854,6 +2216,9 @@ class SalaryApp(MDApp):
         self.sm.add_widget(CodesScreen(name="codes"))
         self.sm.add_widget(AboutScreen(name="about"))
         Clock.schedule_once(lambda dt: self.auto_check(), 1.5)
+        threading.Thread(
+            target=self.sm.get_screen("about").sync_pdf_to_downloads, daemon=True
+        ).start()
         return self.sm
 
     def auto_check(self):
