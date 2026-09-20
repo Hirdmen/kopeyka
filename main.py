@@ -41,7 +41,8 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.behaviors import ButtonBehavior  # ← добавьте эту строку
-from kivy.uix.popup import Popup
+from kivy.uix.popup import Popup as _KivyPopup
+from kivy.uix.switch import Switch
 from kivy.uix.textinput import TextInput
 from kivy.uix.screenmanager import ScreenManager
 from kivymd.app import MDApp
@@ -223,7 +224,10 @@ except Exception:
 GITHUB_REPO = "Hirdmen/kopeyka"
 DEV_NAME = "Hirdmen"
 DEV_EMAIL = "hird78lvl@yandex.ru"
+VK_URL = "https://vk.ru/club241613930"
 DONATE_URL = "https://c2c.cbrpay.ru/AS1I0034FA1DBA2G8IJAPIBMBTBR13O1"
+SUPPORT_PHONE_DISPLAY = "+7 917 828-28-20"
+SUPPORT_PHONE_COPY = "+79178282820"
 QR_PATH = os.path.join(APP_DIR, "donate_qr.png")
 ICON_PATH = os.path.join(APP_DIR, "icon.png")
 
@@ -236,6 +240,51 @@ RED = (0.94, 0.42, 0.40, 1)
 TEXT = (0.92, 0.94, 0.96, 1)
 DIM = (0.62, 0.67, 0.75, 1)
 BTN = (0.13, 0.42, 0.24, 1)
+
+SCHEMES = {
+    "dark": {
+        "BG": (0.07, 0.08, 0.10, 1), "CARD": (0.13, 0.15, 0.19, 1),
+        "BAR": (0.10, 0.12, 0.16, 1), "GREEN": (0.40, 0.73, 0.42, 1),
+        "TEXT": (0.92, 0.94, 0.96, 1), "DIM": (0.62, 0.67, 0.75, 1),
+        "BTN": (0.13, 0.42, 0.24, 1),
+    },
+    "light_green": {
+        "BG": (0.95, 0.96, 0.95, 1), "CARD": (0.88, 0.92, 0.88, 1),
+        "BAR": (0.85, 0.90, 0.86, 1), "GREEN": (0.13, 0.45, 0.20, 1),
+        "TEXT": (0.10, 0.12, 0.10, 1), "DIM": (0.38, 0.42, 0.40, 1),
+        "BTN": (0.30, 0.60, 0.35, 1),
+    },
+    "light_blue": {
+        "BG": (0.94, 0.96, 0.99, 1), "CARD": (0.87, 0.91, 0.96, 1),
+        "BAR": (0.84, 0.89, 0.95, 1), "GREEN": (0.10, 0.35, 0.65, 1),
+        "TEXT": (0.10, 0.12, 0.16, 1), "DIM": (0.38, 0.42, 0.48, 1),
+        "BTN": (0.20, 0.45, 0.75, 1),
+    },
+}
+
+
+def apply_scheme(name):
+    """Применяет цветовую схему из конфига. Вызывать ДО создания экранов."""
+    global BG, CARD, BAR, GREEN, TEXT, DIM, BTN
+    p = SCHEMES.get(name, SCHEMES["dark"])
+    BG, CARD, BAR = p["BG"], p["CARD"], p["BAR"]
+    GREEN, TEXT, DIM, BTN = p["GREEN"], p["TEXT"], p["DIM"], p["BTN"]
+    from kivy.core.window import Window
+    Window.clearcolor = BG
+
+
+def Popup(**kw):  # noqa: N802
+    """Обёртка: панель попапа красится в CARD текущей схемы."""
+    p = _KivyPopup(**kw)
+    c = kw.get("content")
+    if c is not None:
+        from kivy.graphics import Color, Rectangle
+        with c.canvas.before:
+            Color(*CARD)
+            rect = Rectangle(pos=c.pos, size=c.size)
+        c.bind(pos=lambda i, v: setattr(rect, "pos", v),
+               size=lambda i, v: setattr(rect, "size", v))
+    return p
 
 IMAP_SERVERS = {
     "yandex.ru": "imap.yandex.ru",
@@ -1658,10 +1707,81 @@ class AccountForm(Card):
 
 
 class SettingsScreen(MDScreen):
+    """Хаб настроек: оформление, обновления, вход в почтовые аккаунты."""
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
-        root.add_widget(TopBar("Настройки почты", back_cb=self.back))
+        root.add_widget(TopBar("Настройки", back_cb=self.back))
+        self.box = GridLayout(cols=1, size_hint_y=None, spacing=dp(6))
+        self.box.bind(minimum_height=self.box.setter("height"))
+        sv = ScrollView(do_scroll_y=True)
+        sv.add_widget(self.box)
+        root.add_widget(sv)
+        self.add_widget(root)
+
+    def back(self, *a):
+        self.manager.current = "main"
+
+    def on_enter(self):
+        app = MDApp.get_running_app()
+        self.box.clear_widgets()
+
+        def header(t):
+            lbl = Label(text=t, color=DIM, font_size="12sp", bold=True,
+                        halign="left", size_hint_y=None, height=dp(24))
+            lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+            self.box.add_widget(lbl)
+
+        header("ОФОРМЛЕНИЕ")
+        cur = app.cfg.get("scheme", "dark")
+        for key, title in (("dark", "Темная (по умолчанию)"),
+                           ("light_green", "Светлая зеленая"),
+                           ("light_blue", "Светлая синяя")):
+            mark = " (текущая)" if key == cur else ""
+            b = AccentButton(text=title + mark, size_hint_y=None, height=dp(46))
+            b.bind(on_release=lambda *a, k=key: self.set_scheme(k))
+            self.box.add_widget(b)
+        note = Label(text="Схема применится при следующем запуске",
+                     color=DIM, font_size="11sp", halign="left",
+                     size_hint_y=None, height=dp(20))
+        note.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        self.box.add_widget(note)
+
+        header("ОБНОВЛЕНИЯ")
+        row = BoxLayout(size_hint_y=None, height=dp(46))
+        lbl = Label(text="Проверять обновления при запуске", color=TEXT,
+                    font_size="14sp", halign="left", valign="middle")
+        lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        row.add_widget(lbl)
+        sw = Switch(active=bool(app.cfg.get("auto_update", True)),
+                    size_hint_x=None, width=dp(70))
+        sw.bind(active=self.set_auto_update)
+        row.add_widget(sw)
+        self.box.add_widget(row)
+
+        header("ПОЧТА")
+        b = AccentButton(text="Почтовые ящики", size_hint_y=None, height=dp(46))
+        b.bind(on_release=lambda *a: setattr(self.manager, "current", "accounts"))
+        self.box.add_widget(b)
+
+    def set_scheme(self, key):
+        app = MDApp.get_running_app()
+        app.cfg["scheme"] = key
+        save_config(app.cfg)
+        self.on_enter()
+
+    def set_auto_update(self, sw, value):
+        app = MDApp.get_running_app()
+        app.cfg["auto_update"] = bool(value)
+        save_config(app.cfg)
+
+
+class AccountsScreen(MDScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
+        root.add_widget(TopBar("Почта", back_cb=self.back))
         self.forms_box = GridLayout(cols=1, size_hint_y=None, spacing=dp(10))
         self.forms_box.bind(minimum_height=self.forms_box.setter("height"))
         sv = ScrollView(do_scroll_y=True)
@@ -1679,7 +1799,7 @@ class SettingsScreen(MDScreen):
         self.forms = []
 
     def back(self, *a):
-        self.manager.current = "main"
+        self.manager.current = "settings"
 
     def on_enter(self):
         self.forms_box.clear_widgets()
@@ -1696,9 +1816,10 @@ class SettingsScreen(MDScreen):
         self._add({})
 
     def save(self, *a):
-        MDApp.get_running_app().cfg = {"accounts": [f.to_dict() for f in self.forms]}
-        save_config(MDApp.get_running_app().cfg)
-        self.manager.current = "main"
+        app = MDApp.get_running_app()
+        app.cfg["accounts"] = [f.to_dict() for f in self.forms]
+        save_config(app.cfg)
+        self.manager.current = "settings"
 
 
 class CodesScreen(MDScreen):
@@ -1884,7 +2005,10 @@ class AboutScreen(MDScreen):
         b = AccentButton(
             text="Написать на почту — баги, пожелания", size_hint_y=None, height=dp(46)
         )
-        b.bind(on_release=lambda *a: webbrowser.open(f"mailto:{DEV_EMAIL}"))
+        b.bind(on_release=self.open_mail)
+        c.add_widget(b)
+        b = AccentButton(text="Сообщество ВКонтакте", size_hint_y=None, height=dp(46))
+        b.bind(on_release=lambda *a: webbrowser.open(VK_URL))
         c.add_widget(b)
         b = AccentButton(text="Проект на GitHub", size_hint_y=None, height=dp(46))
         b.bind(
@@ -1897,11 +2021,19 @@ class AboutScreen(MDScreen):
         c.add_widget(left_label("[b]Поддержка[/b]", TEXT, "15sp"))
         c.add_widget(
             left_label(
-                "Если программа полезна — угости разработчика кофе "
-                "(СБП: откроется банковское приложение с формой перевода).",
+                "Если программа полезна — угости разработчика кофе: "
+                "перевод через СБП по номеру телефона "
+                "в любом банковском приложении.",
                 DIM,
             )
         )
+
+        b = AccentButton(
+            text=f"{SUPPORT_PHONE_COPY}  скопировать номер",
+            size_hint_y=None, height=dp(46),
+        )
+        b.bind(on_release=self.copy_phone)
+        c.add_widget(b)
         b = AccentButton(text="Кофе разработчику", size_hint_y=None, height=dp(46))
         b.bind(on_release=lambda *a: webbrowser.open(DONATE_URL))
         c.add_widget(b)
@@ -1928,6 +2060,58 @@ class AboutScreen(MDScreen):
 
     def _status(self, s):
         Clock.schedule_once(lambda dt: setattr(self.upd_status, "text", s))
+
+    def open_mail(self, *a):
+        """Почта: Android — intent в почтовое приложение;
+        ПК — попап с копированием адреса + открытие веб-почты."""
+        if _platform == "android":
+            webbrowser.open(f"mailto:{DEV_EMAIL}")
+            return
+        from kivy.core.clipboard import Clipboard
+        Clipboard.copy(DEV_EMAIL)
+        box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        lbl = Label(
+            text=f"Адрес скопирован:\n{DEV_EMAIL}\n\n"
+                 "Вставь его в поле «Кому» своей веб-почты\n"
+                 "или нажми «Открыть Яндекс.Почту».",
+            color=TEXT, font_size="15sp", halign="center",
+        )
+        lbl.bind(size=lbl.setter("text_size"))
+        box.add_widget(lbl)
+        btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
+        web_btn = AccentButton(text="Открыть Яндекс.Почту")
+        ok_btn = AccentButton(text="Закрыть")
+        popup = Popup(title="Написать на почту", content=box, size_hint=(0.9, 0.4))
+        
+        def open_web(*a):
+            webbrowser.open("https://mail.yandex.ru")
+            popup.dismiss()
+        
+        web_btn.bind(on_release=open_web)
+        ok_btn.bind(on_release=popup.dismiss)
+        btn_row.add_widget(web_btn)
+        btn_row.add_widget(ok_btn)
+        box.add_widget(btn_row)
+        popup.open()
+
+
+    def copy_phone(self, *a):
+        """Копирует номер поддержки и показывает подсказку."""
+        from kivy.core.clipboard import Clipboard
+        Clipboard.copy(SUPPORT_PHONE_COPY)
+        box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+        lbl = Label(
+            text="Номер скопирован.\nПриложение банка → Переводы → "
+                 "«По номеру телефона» → вставить номер.",
+            color=TEXT, font_size="15sp", halign="center",
+        )
+        lbl.bind(size=lbl.setter("text_size"))
+        box.add_widget(lbl)
+        ok = AccentButton(text="Понятно", size_hint_y=None, height=dp(46))
+        popup = Popup(title="СБП", content=box, size_hint=(0.85, 0.3))
+        ok.bind(on_release=popup.dismiss)
+        box.add_widget(ok)
+        popup.open()
 
     def show_qr(self, *a):
         box = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(10))
@@ -2209,10 +2393,15 @@ class SalaryApp(MDApp):
         self.theme_cls.ripple_scale = 0
         self.db = storage.connect(DB_PATH)
         self.cfg = load_config()
+        apply_scheme(self.cfg.get("scheme", "dark"))
+        self.theme_cls.theme_style = (
+            "Dark" if self.cfg.get("scheme", "dark") == "dark" else "Light"
+        )
         self.sm = ScreenManager()
         self.sm.add_widget(MainScreen(name="main"))
         self.sm.add_widget(DetailScreen(name="detail"))
         self.sm.add_widget(SettingsScreen(name="settings"))
+        self.sm.add_widget(AccountsScreen(name="accounts"))
         self.sm.add_widget(CodesScreen(name="codes"))
         self.sm.add_widget(AboutScreen(name="about"))
         Clock.schedule_once(lambda dt: self.auto_check(), 1.5)
@@ -2222,6 +2411,8 @@ class SalaryApp(MDApp):
         return self.sm
 
     def auto_check(self):
+        if not self.cfg.get("auto_update", True):
+            return
         try:
             import datetime
 
