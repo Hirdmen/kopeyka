@@ -216,7 +216,7 @@ DB_PATH = os.path.join(DATA_DIR, "salary.db")
 CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
 APP_NAME = "Расчетки"
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 try:
     from channel import CHANNEL
 except Exception:
