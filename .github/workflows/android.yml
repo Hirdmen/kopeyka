@@ -15,6 +15,18 @@ jobs:
           echo "CHANNEL = '${{ github.ref_name == 'android-test' && 'test' || 'github' }}'" > channel.py
           cat channel.py
 
+      - name: Personalize build (identity + version)
+        run: |
+          V=$(grep -oP '^APP_VERSION = "\K[0-9][0-9.]*' main.py)
+          sed -i "s/^version = .*/version = $V/" buildozer.spec
+          if [ "${{ github.ref_name }}" = "android-test" ]; then
+            sed -i 's/^title = .*/title = Копейка тест/' buildozer.spec
+            sed -i 's/^package\.name = .*/package.name = kopeyka.test/' buildozer.spec
+            sed -i 's/^package\.domain = .*/package.domain = org.kopeyka.test/' buildozer.spec
+          fi
+          echo "=== Effective buildozer.spec ==="
+          grep -E '^(title|package\.name|package\.domain|version)' buildozer.spec
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

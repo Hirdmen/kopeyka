@@ -16,3 +16,4 @@ imap_lastcheck.json
 imap_senders.json
 runmain.bat
 *.bat
+channel.py
