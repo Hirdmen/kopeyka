@@ -14,3 +14,5 @@ make_icon_final.py
 channel.txt
 imap_lastcheck.json
 imap_senders.json
+runmain.bat
+*.bat
