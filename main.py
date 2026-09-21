@@ -2290,10 +2290,11 @@ class AboutScreen(MDScreen):
         """Android: допубликовывает копии всех расчеток в Загрузки/Kopeyka."""
         if _platform != "android":
             return 0
+        app = MDApp.get_running_app()
         published = 0
-        rows = self.db.execute("SELECT email, filename FROM payslips").fetchall()
+        rows = app.db.execute("SELECT email, filename FROM payslips").fetchall()
         for addr, fname in rows:
-            acc = next((x for x in self.cfg["accounts"] if x["email"] == addr), None)
+            acc = next((x for x in app.cfg["accounts"] if x["email"] == addr), None)
             base = (acc.get("save_dir") if acc else "") or PDF_DIR
             path = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr), fname)
             if not os.path.exists(path):
