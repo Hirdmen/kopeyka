@@ -618,9 +618,9 @@ class TapRow(ButtonBehavior, BoxLayout):
 HELP_TEXT = f"""КАК НАСТРОИТЬ ПРИЛОЖЕНИЕ (пошагово)
 
 Эта же инструкция — на
-[ref=https://github.com/{GITHUB_REPO}/blob/main/ИНСТРУКЦИЯ.md][color=64B5F6]GitHub[/color][/ref]
+[ref=https://github.com/{GITHUB_REPO}/blob/main/ИНСТРУКЦИЯ.md][color=42A5F5]GitHub[/color][/ref]
 и в ВК сообществе
-[ref=https://vk.ru/club241613930][color=64B5F6]Мир ПК: железо, софт, настройки[/color][/ref].
+[ref=https://vk.ru/club241613930][color=42A5F5]Мир ПК: железо, софт, настройки[/color][/ref].
 Инструкция закреплена вверху постов, там же можно задать вопрос о приложении.
 
 Приложение читает расчетки из вашей почты. Чтобы войти, нужен
@@ -717,7 +717,7 @@ Google: слева «Ещё» -> «Создать ярлык» -> «Расчет
   разработчика, сообщество ВКонтакте, проект на GitHub.
 
 Если что-то непонятно или встретился баг — пишите в сообщество:
-[ref=https://vk.ru/club241613930][color=64B5F6]Мир ПК: железо, софт, настройки[/color][/ref].
+[ref=https://vk.ru/club241613930][color=42A5F5]Мир ПК: железо, софт, настройки[/color][/ref].
 Инструкция по настройке закреплена вверху постов.
 """
 
@@ -725,7 +725,7 @@ def _linkify(t):
     """Превращает http(s)-ссылки в тексте в кликабельные [ref] (markup)."""
     return re.sub(
         r"(?<![=\w])(https?://[^\s\]]+)",
-        r"[ref=\1][color=64B5F6]\1[/color][/ref]",
+        r"[ref=\1][color=42A5F5]\1[/color][/ref]",
         t,
     )
 
