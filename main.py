@@ -240,35 +240,42 @@ RED = (0.94, 0.42, 0.40, 1)
 TEXT = (0.92, 0.94, 0.96, 1)
 DIM = (0.62, 0.67, 0.75, 1)
 BTN = (0.13, 0.42, 0.24, 1)
+POS = "66BB6A"
+NEG = "FF6B66"
+MUTE = "9AA5B5"
 
 SCHEMES = {
     "dark": {
         "BG": (0.07, 0.08, 0.10, 1), "CARD": (0.13, 0.15, 0.19, 1),
         "BAR": (0.10, 0.12, 0.16, 1), "GREEN": (0.40, 0.73, 0.42, 1),
-        "TEXT": (0.92, 0.94, 0.96, 1), "DIM": (0.62, 0.67, 0.75, 1),
+        "TEXT": (0.97, 0.98, 1.0, 1), "DIM": (0.62, 0.67, 0.75, 1),
         "BTN": (0.13, 0.42, 0.24, 1),
+        "POS": "66BB6A", "NEG": "FF6B66", "MUTE": "9AA5B5",
     },
     "light_green": {
         "BG": (0.95, 0.96, 0.95, 1), "CARD": (0.88, 0.92, 0.88, 1),
         "BAR": (0.85, 0.90, 0.86, 1), "GREEN": (0.13, 0.45, 0.20, 1),
-        "TEXT": (0.10, 0.12, 0.10, 1), "DIM": (0.38, 0.42, 0.40, 1),
+        "TEXT": (0.10, 0.12, 0.10, 1), "DIM": (0.25, 0.28, 0.27, 1),
         "BTN": (0.30, 0.60, 0.35, 1),
+        "POS": "1E7E34", "NEG": "C62828", "MUTE": "5F6B63",
     },
     "light_blue": {
         "BG": (0.94, 0.96, 0.99, 1), "CARD": (0.87, 0.91, 0.96, 1),
         "BAR": (0.84, 0.89, 0.95, 1), "GREEN": (0.10, 0.35, 0.65, 1),
-        "TEXT": (0.10, 0.12, 0.16, 1), "DIM": (0.38, 0.42, 0.48, 1),
+        "TEXT": (0.10, 0.12, 0.16, 1), "DIM": (0.25, 0.28, 0.34, 1),
         "BTN": (0.20, 0.45, 0.75, 1),
+        "POS": "1565C0", "NEG": "C62828", "MUTE": "5A6775",        
     },
 }
 
 
 def apply_scheme(name):
     """Применяет цветовую схему из конфига. Вызывать ДО создания экранов."""
-    global BG, CARD, BAR, GREEN, TEXT, DIM, BTN
+    global BG, CARD, BAR, GREEN, TEXT, DIM, BTN, POS, NEG, MUTE
     p = SCHEMES.get(name, SCHEMES["dark"])
     BG, CARD, BAR = p["BG"], p["CARD"], p["BAR"]
     GREEN, TEXT, DIM, BTN = p["GREEN"], p["TEXT"], p["DIM"], p["BTN"]
+    POS, NEG, MUTE = p["POS"], p["NEG"], p["MUTE"]
     from kivy.core.window import Window
     Window.clearcolor = BG
 
@@ -618,9 +625,9 @@ class TapRow(ButtonBehavior, BoxLayout):
 HELP_TEXT = f"""КАК НАСТРОИТЬ ПРИЛОЖЕНИЕ (пошагово)
 
 Эта же инструкция — на
-[ref=https://github.com/{GITHUB_REPO}/blob/main/ИНСТРУКЦИЯ.md][color=42A5F5]GitHub[/color][/ref]
+[ref=https://github.com/{GITHUB_REPO}/blob/main/ИНСТРУКЦИЯ.md][color=1E88E5]GitHub[/color][/ref]
 и в ВК сообществе
-[ref=https://vk.ru/club241613930][color=42A5F5]Мир ПК: железо, софт, настройки[/color][/ref].
+[ref=https://vk.ru/club241613930][color=1E88E5]Мир ПК: железо, софт, настройки[/color][/ref].
 Инструкция закреплена вверху постов, там же можно задать вопрос о приложении.
 
 Приложение читает расчетки из вашей почты. Чтобы войти, нужен
@@ -717,7 +724,7 @@ Google: слева «Ещё» -> «Создать ярлык» -> «Расчет
   разработчика, сообщество ВКонтакте, проект на GitHub.
 
 Если что-то непонятно или встретился баг — пишите в сообщество:
-[ref=https://vk.ru/club241613930][color=42A5F5]Мир ПК: железо, софт, настройки[/color][/ref].
+[ref=https://vk.ru/club241613930][color=1E88E5]Мир ПК: железо, софт, настройки[/color][/ref].
 Инструкция по настройке закреплена вверху постов.
 """
 
@@ -725,14 +732,14 @@ def _linkify(t):
     """Превращает http(s)-ссылки в тексте в кликабельные [ref] (markup)."""
     return re.sub(
         r"(?<![=\w])(https?://[^\s\]]+)",
-        r"[ref=\1][color=42A5F5]\1[/color][/ref]",
+        r"[ref=\1][color=1E88E5]\1[/color][/ref]",
         t,
     )
 
 
 def show_code_card(code, name, s, h):
     """Плитка-карточка кода: полное имя, сумма, часы (если есть)."""
-    hexcol = "FF6B66" if int(str(code).rstrip("П")) >= 400 else "66BB6A"
+    hexcol = NEG if int(str(code).rstrip("П")) >= 400 else POS
     box = BoxLayout(
         orientation="vertical", spacing=dp(6), padding=dp(12), size_hint_y=None
     )
@@ -1177,7 +1184,7 @@ class MainScreen(MDScreen):
         for i, (pid, period, paid) in enumerate(rows, 1):
             b = CardButton(
                 text=f'[b]{i}. {period or "Без периода"}[/b]    '
-                f"Получка: [color=66BB6A]{paid:,.2f}[/color]",
+                f"Получка: [color={POS}]{paid:,.2f}[/color]",
                 size_hint_y=None,
                 height=dp(58),
             )
@@ -1653,7 +1660,8 @@ class DetailScreen(MDScreen):
             g = GridLayout(cols=2, size_hint_y=None, height=dp(34))
             g.add_widget(left_label(name, DIM))
             v = Label(
-                text=f"{val:,.2f}" if val is not None else "—",
+                text=f"[b]{val:,.2f}[/b]" if val is not None else "—",
+                markup=True,
                 color=col,
                 font_size="14sp",
                 halign="right",
@@ -1666,7 +1674,7 @@ class DetailScreen(MDScreen):
         g.add_widget(left_label("[b]ПОЛУЧКА[/b]", TEXT, "16sp"))
         v = Label(
             text=(
-                f'[b][color=66BB6A]{d.get("paid"):,.2f}[/color][/b]'
+                f'[b][color={POS}]{d.get("paid"):,.2f}[/color][/b]'
                 if d.get("paid") is not None
                 else "—"
             ),
@@ -1759,10 +1767,10 @@ class DetailScreen(MDScreen):
             lbl3.bind(size=lbl3.setter("text_size"))
 
             lbl4 = Label(
-                text=f"{s:,.2f}",
+                text=f"[b]{s:,.2f}[/b]",
+                markup=True,
                 color=col,
                 font_size="15sp",
-                bold=True,
                 size_hint_x=None,
                 width=dp(110),
                 halign="right",
@@ -2043,9 +2051,9 @@ class CodesScreen(MDScreen):
             self.box.add_widget(left_label(f"Код не найден: {q}", DIM))
             return
         for code, name in items:
-            hexcol = "FF6B66" if int(str(code).rstrip("П")) >= 400 else "66BB6A"
+            hexcol = NEG if int(str(code).rstrip("П")) >= 400 else POS
             cnt = (
-                f"  [color=9AA5B5]×{self.usage[code]}[/color]"
+                f"  [color={MUTE}]×{self.usage[code]}[/color]"
                 if code in self.usage
                 else ""
             )
@@ -2095,7 +2103,7 @@ class CodesScreen(MDScreen):
         box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
         box.add_widget(
             left_label(
-                f"[b][color={'FF6B66' if ded else '66BB6A'}]{code}[/color][/b]",
+                f"[b][color={NEG if ded else POS}]{code}[/color][/b]",
                 TEXT,
                 "24sp",
             )
@@ -2103,7 +2111,7 @@ class CodesScreen(MDScreen):
         box.add_widget(left_label(name, TEXT, "15sp"))
         box.add_widget(
             left_label(
-                f"[color={'FF6B66' if ded else '66BB6A'}]"
+                f"[color={NEG if ded else POS}]"
                 f"{'УДЕРЖАНИЕ' if ded else 'НАЧИСЛЕНИЕ'}[/color]",
                 TEXT,
                 "13sp",
