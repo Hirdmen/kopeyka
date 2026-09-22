@@ -736,7 +736,15 @@ def _linkify(t):
         t,
     )
 
+DAYS_CODES = {"110", "137", "138", "139", "157", "158", "387"}  # количество — дни, как в PDF
 
+
+def _hours_view(h, code):
+    """Возвращает (единица для карточки, текст для карточки, текст для строки)."""
+    if str(code).rstrip("П") in DAYS_CODES:
+        whole = f"{h:.0f}" if abs(h - round(h)) < 0.01 else f"{h:.1f}"
+        return "Дней", whole, f"{whole} дн"
+    return "Часы", f"{h:.1f}", f"{h:.1f}"
 def show_code_card(code, name, s, h):
     """Плитка-карточка кода: полное имя, сумма, часы (если есть)."""
     hexcol = NEG if int(str(code).rstrip("П")) >= 400 else POS
@@ -761,9 +769,10 @@ def show_code_card(code, name, s, h):
     nl.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
     box.add_widget(nl)
     if h:
+        unit, card_txt, _row = _hours_view(h, code)
         line = (
             f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
-            f"     Часы: [b][color={hexcol}]{h:.1f}[/color][/b]"
+            f"     {unit}: [b][color={hexcol}]{card_txt}[/color][/b]"
         )
     else:
         line = f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
@@ -1184,7 +1193,7 @@ class MainScreen(MDScreen):
         for i, (pid, period, paid) in enumerate(rows, 1):
             b = CardButton(
                 text=f'[b]{i}. {period or "Без периода"}[/b]    '
-                f"Получка: [color={POS}]{paid:,.2f}[/color]",
+                f"Получка: [b][size=17sp][color={POS}]{paid:,.2f}[/color][/size][/b]",
                 size_hint_y=None,
                 height=dp(58),
             )
@@ -1694,11 +1703,11 @@ class DetailScreen(MDScreen):
         header.add_widget(Label(text="", size_hint_x=1))
         header.add_widget(
             Label(
-                text="[size=12sp]часы[/size]",
+                text="[size=12sp]часы/дни[/size]",
                 markup=True,
                 color=DIM,
                 size_hint_x=None,
-                width=dp(60),
+                width=dp(70),
                 halign="right",
                 valign="middle",
             )
@@ -1754,13 +1763,13 @@ class DetailScreen(MDScreen):
 
             lbl2.bind(size=_refit)
 
-            hours_text = f"{h:.1f}" if h else ""
+            hours_text = _hours_view(h, code)[2] if h else ""
             lbl3 = Label(
                 text=hours_text,
                 color=col,
                 font_size="15sp",
                 size_hint_x=None,
-                width=dp(60),
+                width=dp(70),
                 halign="right",
                 valign="middle",
             )
