@@ -783,6 +783,26 @@ def _clamp_two_lines(lbl, full_text, max_px):
             hi = mid - 1
     lbl.text = full_text[:lo] + "…"
 
+def paste_header(label_text, get_field):
+    """Строка заголовка поля с кнопкой «Вставить» справа."""
+    row = BoxLayout(size_hint_y=None, height=dp(26), spacing=dp(6))
+    row.add_widget(left_label(label_text, DIM, "12sp"))
+    btn = AccentButton(text="Вставить", size_hint_x=None, width=dp(86), height=dp(26))
+    btn.font_size = "12sp"
+
+    def _paste(*a):
+        try:
+            from kivy.core.clipboard import Clipboard
+            t = (Clipboard.paste() or "").strip()
+            f = get_field()
+            if f is not None and t:
+                f.text = t
+        except Exception:
+            pass
+
+    btn.bind(on_release=_paste)
+    row.add_widget(btn)
+    return row
 
 def password_row(initial="", hint="Пароль"):
     """Поле пароля + кнопка видимости (abc / •••)."""
@@ -848,6 +868,13 @@ class MainScreen(MDScreen):
         )
         self.acc_btn.bind(on_release=self.open_accounts)
         bottom_row.add_widget(self.acc_btn)
+        # адрес прижат влево, лишнее обрезается, целиком виден по тапу
+        self.acc_btn.halign = "left"
+        self.acc_btn.shorten = True
+        self.acc_btn.shorten_from = "right"
+        self.acc_btn.bind(
+            size=lambda i, v: setattr(i, "text_size", (v[0] - dp(12), None))
+        )
         root.add_widget(bottom_row)
         
         # Сворачиваемый журнал (по умолчанию скрыт)
@@ -867,10 +894,20 @@ class MainScreen(MDScreen):
             foreground_color=GREEN,
         )
         root.add_widget(self.log)
-        
+
+        def _clear_sel(i, touch):
+            i.cancel_selection()
+            return False  # не мешаем прокрутке
+
+        self.log.bind(on_touch_down=_clear_sel)
         self.add_widget(root)
         self.current_acc = None
-        self.log_lines = []  # только текущая сессия
+        self.log_lines = []
+        self.log_line(
+            f"Запуск: v{APP_VERSION}, "
+            f"канал={CHANNEL or ('test' if _platform == 'android' else 'github')}, "
+            f"платформа={_platform}"
+        )  # только текущая сессия
 
     def on_enter(self):
         accs = [a["email"] for a in MDApp.get_running_app().cfg["accounts"]]
@@ -949,8 +986,75 @@ class MainScreen(MDScreen):
             self.log.height = dp(0)
             self.log_toggle.text = f"▶ Журнал ({len(self.log_lines)})"
 
+    def send_log_to_dev(self, *a):
+        """Android: письмо с логом через Intent.
+        ПК и при сбое: лог в буфер + подсказка, как отправить вручную."""
+        from kivy.core.clipboard import Clipboard
+
+        subject = f"Лог Kopeyka v{APP_VERSION} ({_platform})"
+        body = "\n".join(self.log_lines) if self.log_lines else "Журнал пуст."
+
+        if _platform == "android":
+            try:
+                from jnius import autoclass  # type: ignore
+                Intent = autoclass("android.content.Intent")
+                activity = autoclass("org.kivy.android.PythonActivity").mActivity
+                intent = Intent(Intent.ACTION_SEND)
+                intent.setType("message/rfc822")
+                intent.putExtra(Intent.EXTRA_EMAIL, [DEV_EMAIL])
+                intent.putExtra(Intent.EXTRA_SUBJECT, subject)
+                intent.putExtra(Intent.EXTRA_TEXT, body)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(Intent.createChooser(intent, "Отправить лог"))
+                return "sent"
+            except Exception as e:
+                print("[kopeyka] send_log intent failed:", e)
+
+        Clipboard.copy(body)
+        self.open_send_hint()
+        return "copied"
+
+    def open_send_hint(self):
+        """Подсказка: лог уже в буфере, как отправить вручную."""
+        from kivy.core.clipboard import Clipboard
+        box = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(16))
+        msg = Label(
+            text="Журнал скопирован в буфер обмена.\n"
+                 "Создай письмо и вставь лог в текст письма.\n"
+                 "Потом нажми «Копировать адрес» — и вставь его в поле «Кому».\n"
+                 "Или открой веб-почту кнопкой ниже.",
+            color=TEXT, font_size="14sp", halign="center", valign="middle",
+        )
+        msg.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+        box.add_widget(msg)
+
+        addr_btn = AccentButton(text="Копировать адрес", size_hint_y=None, height=dp(44))
+
+        def do_addr(*a):
+            Clipboard.copy(DEV_EMAIL)
+            addr_btn.text = "Адрес скопирован!"
+            Clock.schedule_once(lambda dt: setattr(addr_btn, "text", "Копировать адрес"), 2)
+
+        addr_btn.bind(on_release=do_addr)
+        box.add_widget(addr_btn)
+
+        web_btn = AccentButton(text="Открыть Яндекс.Почту", size_hint_y=None, height=dp(44))
+
+        def do_web(*a):
+            import webbrowser
+            webbrowser.open("https://mail.yandex.ru/")
+
+        web_btn.bind(on_release=do_web)
+        box.add_widget(web_btn)
+
+        close_btn = AccentButton(text="Закрыть", size_hint_y=None, height=dp(44))
+        popup = Popup(title="Отправка лога", content=box, size_hint=(0.9, 0.55))
+        close_btn.bind(on_release=popup.dismiss)
+        box.add_widget(close_btn)
+        popup.open()
+
     def open_log_full(self, *a):
-        """Полный экран журнала с кнопкой копирования."""
+        """Полный экран журнала: копирование, отправка, закрытие."""
         box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(12))
         lbl = Label(
             text="\n".join(self.log_lines) if self.log_lines else "Журнал пуст (текущая сессия).",
@@ -965,20 +1069,33 @@ class MainScreen(MDScreen):
         sv = ScrollView(do_scroll_y=True)
         sv.add_widget(lbl)
         box.add_widget(sv)
-        
+
         btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
-        copy_btn = AccentButton(text="Копировать всё")
+
+        copy_btn = AccentButton(text="Копировать")
+
         def do_copy(*a):
             from kivy.core.clipboard import Clipboard
             Clipboard.copy("\n".join(self.log_lines))
             copy_btn.text = "Скопировано!"
-            Clock.schedule_once(lambda dt: setattr(copy_btn, "text", "Копировать всё"), 2)
+            Clock.schedule_once(lambda dt: setattr(copy_btn, "text", "Копировать"), 2)
+
         copy_btn.bind(on_release=do_copy)
         btn_row.add_widget(copy_btn)
+
+        send_btn = AccentButton(text="Отправить лог")
+
+        def do_send(*a):
+            self.send_log_to_dev()
+
+        send_btn.bind(on_release=do_send)
+        btn_row.add_widget(send_btn)
+
         close_btn = AccentButton(text="Закрыть")
         popup = Popup(title="Журнал сессии", content=box, size_hint=(0.95, 0.85))
         close_btn.bind(on_release=popup.dismiss)
         btn_row.add_widget(close_btn)
+
         box.add_widget(btn_row)
         popup.open()
 
@@ -1033,7 +1150,9 @@ class MainScreen(MDScreen):
         Clock.schedule_once(lambda dt: self.refresh_list())
 
     def log_line(self, s):
-        """Добавляет строку в журнал (только текущая сессия)."""
+        """Добавляет строку в журнал с таймстампом (текущая сессия)."""
+        import time as _time
+        s = f"[{_time.strftime('%H:%M:%S')}] {s}"
         if MDApp.get_running_app() is None:
             return
         def _put(dt):
@@ -1671,7 +1790,7 @@ class AccountForm(Card):
         self.hdr = left_label(f"[b]{d.get('email') or 'Новый ящик'}[/b]", TEXT, "15sp")
         self.add_widget(self.hdr)
 
-        self.add_widget(left_label("EMAIL", DIM, "12sp"))
+        self.add_widget(paste_header("EMAIL", lambda: self.f_email))
         self.f_email = MDTextField(
             hint_text="Email", text=d.get("email", ""), size_hint_y=None, height=dp(62)
         )
@@ -1683,15 +1802,15 @@ class AccountForm(Card):
             left_label("Сервер определится автоматически по домену", DIM, "11sp")
         )
 
-        self.add_widget(left_label("ПАРОЛЬ ПРИЛОЖЕНИЯ (IMAP)", DIM, "12sp"))
+        self.add_widget(paste_header("ПАРОЛЬ ПРИЛОЖЕНИЯ (IMAP)", lambda: self.f_pass))
         r1, self.f_pass = password_row(d.get("password", ""), "Пароль приложения")
         self.add_widget(r1)
 
-        self.add_widget(left_label("ПАРОЛЬ ОТ PDF РАСЧЕТОК", DIM, "12sp"))
+        self.add_widget(paste_header("ПАРОЛЬ ОТ PDF РАСЧЕТОК", lambda: self.f_pdf))
         r2, self.f_pdf = password_row(d.get("pdf_password", ""), "Пароль PDF")
         self.add_widget(r2)
 
-        self.add_widget(left_label("ПАПКА НА ПОЧТЕ · IMAP", DIM, "12sp"))
+        self.add_widget(paste_header("ПАПКА НА ПОЧТЕ · IMAP", lambda: self.f_folder))
         self.f_folder = MDTextField(
             hint_text="Папка на почте (пусто = авто)",
             text=d.get("folder", ""),
