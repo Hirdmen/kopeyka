@@ -446,7 +446,23 @@ class CardButton(Button):
         self._r.pos = self.pos
         self._r.size = self.size
 
+class ListRow(ButtonBehavior, BoxLayout):
+    """Строка списка расчеток: две колонки, тап открывает детализацию."""
 
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.spacing = dp(8)
+        self.padding = [dp(12), 0, dp(12), 0]
+        with self.canvas.before:
+            Color(*CARD)
+            self._r = RoundedRectangle(
+                pos=self.pos, size=self.size, radius=[(dp(12), dp(12))] * 4
+            )
+        self.bind(pos=self._s, size=self._s)
+
+    def _s(self, *a):
+        self._r.pos = self.pos
+        self._r.size = self.size
 class RowCard(ButtonBehavior, BoxLayout):
     """Нумерованная строка списка: номер слева, содержимое справа."""
 
@@ -745,6 +761,11 @@ def _hours_view(h, code):
         whole = f"{h:.0f}" if abs(h - round(h)) < 0.01 else f"{h:.1f}"
         return "Дней", whole, f"{whole} дн"
     return "Часы", f"{h:.1f}", f"{h:.1f}"
+
+def fmt_money(v):
+    """40 000.00: тысячи через неразрывный пробел, копейки через точку."""
+    return f"{v:,.2f}".replace(",", "\xa0")
+
 def show_code_card(code, name, s, h):
     """Плитка-карточка кода: полное имя, сумма, часы (если есть)."""
     hexcol = NEG if int(str(code).rstrip("П")) >= 400 else POS
@@ -771,11 +792,11 @@ def show_code_card(code, name, s, h):
     if h:
         unit, card_txt, _row = _hours_view(h, code)
         line = (
-            f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
+            f"Сумма: [b][color={hexcol}]{fmt_money(s)}[/color][/b]"
             f"     {unit}: [b][color={hexcol}]{card_txt}[/color][/b]"
         )
     else:
-        line = f"Сумма: [b][color={hexcol}]{s:,.2f}[/color][/b]"
+        line = f"Сумма: [b][color={hexcol}]{fmt_money(s)}[/color][/b]"
     box.add_widget(left_label(line, TEXT, "16sp"))
     sv = ScrollView(do_scroll_y=True)
     sv.add_widget(box)
@@ -1190,15 +1211,34 @@ class MainScreen(MDScreen):
                 left_label("Пока пусто. Добавьте почту и нажмите «Проверить».", DIM)
             )
             return
-        for i, (pid, period, paid) in enumerate(rows, 1):
-            b = CardButton(
-                text=f'[b]{i}. {period or "Без периода"}[/b]    '
-                f"Получка: [b][size=17sp][color={POS}]{paid:,.2f}[/color][/size][/b]",
-                size_hint_y=None,
-                height=dp(58),
+        budget = storage.budget_ids(app.db)
+        for pid, period, paid in rows:
+            badge = f" [color={MUTE}](доп.)[/color]" if pid in budget else ""
+            row = ListRow(size_hint_y=None, height=dp(58))
+            lp = Label(
+                text=f"[b]{period or 'Без периода'}[/b]{badge}",
+                markup=True, color=TEXT, font_size="16sp",
+                halign="left", valign="middle", size_hint_x=0.45,
             )
-            b.bind(on_release=lambda *a, p=pid: self.open_detail(p))
-            self.list_box.add_widget(b)
+            lp.bind(size=lp.setter("text_size"))
+            right = BoxLayout(size_hint_x=0.55, spacing=dp(20))
+            lw = Label(
+                text="Получка:", color=TEXT, font_size="16sp",
+                halign="left", valign="middle", size_hint_x=None,
+            )
+            lw.bind(texture_size=lambda inst, val: setattr(inst, "width", val[0]))
+            ls = Label(
+                text=f"[b][size=17sp][color={POS}]{fmt_money(paid)}[/color][/size][/b]",
+                markup=True, color=TEXT, font_size="16sp",
+                halign="left", valign="middle", size_hint_x=1,
+            )
+            ls.bind(size=ls.setter("text_size"))
+            right.add_widget(lw)
+            right.add_widget(ls)
+            row.add_widget(lp)
+            row.add_widget(right)
+            row.bind(on_release=lambda *a, p=pid: self.open_detail(p))
+            self.list_box.add_widget(row)
         self.update_tile()
     def open_detail(self, pid):
         MDApp.get_running_app().current_detail = pid
@@ -1669,7 +1709,7 @@ class DetailScreen(MDScreen):
             g = GridLayout(cols=2, size_hint_y=None, height=dp(34))
             g.add_widget(left_label(name, DIM))
             v = Label(
-                text=f"[b]{val:,.2f}[/b]" if val is not None else "—",
+                text=f"[b]{fmt_money(val)}[/b]" if val is not None else "—",
                 markup=True,
                 color=col,
                 font_size="14sp",
@@ -1683,7 +1723,7 @@ class DetailScreen(MDScreen):
         g.add_widget(left_label("[b]ПОЛУЧКА[/b]", TEXT, "16sp"))
         v = Label(
             text=(
-                f'[b][color={POS}]{d.get("paid"):,.2f}[/color][/b]'
+                f'[b][color={POS}]{fmt_money(d.get("paid"))}[/color][/b]'
                 if d.get("paid") is not None
                 else "—"
             ),
@@ -1776,7 +1816,7 @@ class DetailScreen(MDScreen):
             lbl3.bind(size=lbl3.setter("text_size"))
 
             lbl4 = Label(
-                text=f"[b]{s:,.2f}[/b]",
+                text=f"[b]{fmt_money(s)}[/b]",
                 markup=True,
                 color=col,
                 font_size="15sp",

@@ -109,6 +109,12 @@ def list_payslips(db, email_addr=None):
         args = (email_addr,)
     rows = db.execute(q, args).fetchall()
     return sorted(rows, key=_period_key, reverse=True)
+def budget_ids(db):
+    """Множество id расчеток, где в кодах есть бюджетный 099 (доп. работы)."""
+    cur = db.execute(
+        "SELECT DISTINCT payslip_id FROM payslip_codes WHERE code='099'"
+    )
+    return {r[0] for r in cur.fetchall()}
 
 
 def get(db, payslip_id):
