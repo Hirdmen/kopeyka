@@ -108,7 +108,7 @@ else:
 os.makedirs(DATA_DIR, exist_ok=True)
 PDF_DIR = DATA_DIR
 PAYSLIP_PREFIX = "rasch_list"
-PAYSLIP_SUBJECT_WORDS = ("расчетн", "расчётн", "зарплат", "выплат", "payroll", "payslip", "salary")
+PAYSLIP_SUBJECT_WORDS = ("расчетн", "расчётн", "зарплат", "выплат", "payroll", "payslip", "salary", "rasch")
 KNOWN_SENDER_SEEDS = ("persmaster@vaz.ru",)
 
 
@@ -945,7 +945,27 @@ class MainScreen(MDScreen):
             f"канал={CHANNEL or ('test' if _platform == 'android' else 'github')}, "
             f"платформа={_platform}"
         )  # только текущая сессия
-
+    def migrate_dop(self):
+        """Одноразово: бюджетные расчетки (099) получают имя с _DOP."""
+        app = MDApp.get_running_app()
+        rows = storage.dop_plain_rows(app.db)
+        for pid, addr, fname in rows:
+            new = fname[:-4] + "_DOP.pdf" if fname.lower().endswith(".pdf") else fname + "_DOP"
+            if storage.exists(app.db, addr, new):
+                continue
+            acc = next((x for x in app.cfg["accounts"] if x["email"] == addr), None)
+            base = (acc.get("save_dir") if acc else "") or PDF_DIR
+            acc_dir = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr))
+            try:
+                old = os.path.join(acc_dir, fname)
+                newp = os.path.join(acc_dir, new)
+                if os.path.exists(old) and not os.path.exists(newp):
+                    os.replace(old, newp)
+            except Exception as e:
+                self.log_line(f"Миграция: файл {fname}: {e}")
+            storage.rename_payslip(app.db, pid, new)
+        if rows:
+            self.log_line(f"Миграция: доп-расчетки помечены _DOP: {len(rows)}. Перескачайте почту.")
     def on_enter(self):
         accs = [a["email"] for a in MDApp.get_running_app().cfg["accounts"]]
         if accs and self.current_acc not in accs:
@@ -953,6 +973,7 @@ class MainScreen(MDScreen):
         self.acc_btn.text = (
             f"[b]{self.current_acc}[/b]" if self.current_acc else "Выбрать почту…"
         )
+        self.migrate_dop()        
         self.refresh_list()
 
     def update_tile(self):
@@ -1011,7 +1032,12 @@ class MainScreen(MDScreen):
             else:
                 period_str = "—"
             
-            self.info_tile.update_text(f"РАСЧЕТКИ — {count} шт. с {period_str}")
+            regular, dop = storage.count_by_kind(app.db, self.current_acc)
+            if dop:
+                head = f"РАСЧЕТКИ — {regular} шт. +{dop} шт. Доп."
+            else:
+                head = f"РАСЧЕТКИ — {regular} шт."
+            self.info_tile.update_text(f"{head} с {period_str}")
 
     def toggle_log(self, *a):
         """Разворачивает/сворачивает журнал."""
@@ -1387,17 +1413,24 @@ class MainScreen(MDScreen):
                 if folder == "INBOX" and not addr.lower().endswith("@gmail.com"):
                     self.log_line("Папка не указана: обхожу все папки...")
                     _, dirs = conn.list()
-                    skip_words = {"spam", "junk", "trash", "sent", "drafts", "archive", "архив"}
+                    skip_words = ("drafts", "черновик")
                     folders_to_scan = []
                     for d in dirs:
-                        line = d.decode("utf-8")
-                        match = re.match(r'\([^)]*\)\s+"(.)"\s+"(.+)"$', line)
-                        if match:
-                            fname = match.group(2)
-                            if not any(sw in fname.lower() for sw in skip_words):
-                                folders_to_scan.append(fname)
-                    if not folders_to_scan:
-                        folders_to_scan = ["INBOX"]
+                        line = d.decode("utf-8", "replace")
+                        match = re.match(r'\([^)]*\)\s+"[^"]*"\s+(.+)$', line)
+                        if not match:
+                            continue
+                        raw = match.group(1).strip()
+                        if len(raw) >= 2 and raw.startswith('"') and raw.endswith('"'):
+                            raw = raw[1:-1]
+                        name_low = _from_utf7(raw).lower()
+                        if any(sw in name_low for sw in skip_words):
+                            continue
+                        if raw not in folders_to_scan:
+                            folders_to_scan.append(raw)
+                    if not any(f.upper() == "INBOX" for f in folders_to_scan):
+                        folders_to_scan.insert(0, "INBOX")
+                    self.log_line("Папки обхода: " + ", ".join(_from_utf7(f) for f in folders_to_scan))
                 else:
                     self.log_line(f"Папка не указана: читаю {_from_utf7(folder)}")
                     folders_to_scan = [folder]
@@ -1458,16 +1491,12 @@ class MainScreen(MDScreen):
                     fname = part.get_filename()
                     if not fname:
                         continue
-                    fname = str(email.header.make_header(email.header.decode_header(fname)))
+                    fname = str(email.header.make_header(email.header.decode_header(fname)))                    
                     if not fname.lower().endswith(".pdf"):
                         continue
                     if not fname.lower().startswith(PAYSLIP_PREFIX):
                         continue
-                    if fname in run_saved:
-                        continue
-                    if storage.exists(app.db, addr, fname) and not full:
-                        stop = True
-                        continue
+
                     payload = part.get_payload(decode=True)
                     if not payload:
                         continue
@@ -1475,23 +1504,37 @@ class MainScreen(MDScreen):
                     base = acc.get("save_dir") or PDF_DIR
                     acc_dir = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr))
                     os.makedirs(acc_dir, exist_ok=True)
-                    path = os.path.join(acc_dir, fname)
-                    with open(path, "wb") as f:
+                    tmp_path = os.path.join(acc_dir, fname + ".part")
+                    with open(tmp_path, "wb") as f:
                         f.write(payload)
-                    self.log_line(f"Файл: {fname}")
                     try:
-                        text = pdf_parser.extract_text_from_pdf(path, acc.get("pdf_password"))
+                        text = pdf_parser.extract_text_from_pdf(tmp_path, acc.get("pdf_password"))
                         parsed = pdf_parser.parse_payslip_text(text)
                         if not parsed.get("period") and parsed.get("paid") is None:
-                            os.remove(path)
+                            os.remove(tmp_path)
                             self.log_line(f"Пропуск {fname}: не похоже на расчетку")
                             continue
+                        # имя по содержимому: доп-работы (099) уходят в _DOP
+                        if "099" in (parsed.get("accruals") or {}):
+                            fname = fname[:-4] + "_DOP.pdf"
+                        if fname in run_saved:
+                            os.remove(tmp_path)
+                            continue
+                        if storage.exists(app.db, addr, fname) and not full:
+                            os.remove(tmp_path)
+                            stop = True
+                            continue
+                        path = os.path.join(acc_dir, fname)
+                        os.replace(tmp_path, path)
+                        self.log_line(f"Файл: {fname}")
                         storage.save(app.db, addr, fname, parsed)
                         run_saved.add(fname)
                         done += 1
                         _remember_sender(addr, msg)
                         self.log_line(f'OK {parsed.get("period")}: получка {parsed.get("paid")}')
                     except Exception as e:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
                         self.log_line(f"Внимание, ошибка разбора {fname}: {e}")
                     
             def fetch_uids(uids, what):
@@ -1532,49 +1575,43 @@ class MainScreen(MDScreen):
                 elif done == 0 and not first_run:
                     self.log_line("Новых писем нет.")
             else:
-                typ, data = conn.uid("SEARCH", "ALL")
-                uids = data[0].split() if data[0] else []
-                
-                self.log_line(f"Полный скан: писем {len(uids)}, смотрю заголовки…")
-                cand = []
-                seen = 0
-                for ch in chunks(uids, 400):
-                    for head, raw in fetch_uids(ch, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)])"):
-                        m = re.search(rb"UID (\d+)", head)
-                        if not m:
-                            continue
-                        h = email.message_from_bytes(raw)
-                        subj = str(email.header.make_header(email.header.decode_header(h.get("Subject") or ""))).lower()
-                        frm = str(h.get("From", "")).lower()
-                        if (any(w in subj or w in frm for w in PAYSLIP_SUBJECT_WORDS)
-                                or any(s in frm for s in senders)
-                                or any(d in frm for d in _known_domains(addr))):
-                            cand.append(m.group(1))
-                    seen += len(ch)
-                    self.log_line(f"  заголовки: {seen}/{len(uids)}, кандидатов: {len(cand)}")        
-                self.log_line(f"Кандидатов на полную загрузку: {len(cand)}")
-                if cand or senders:
+                for scan_folder in folders_to_scan:
+                    if not select_folder(scan_folder):
+                        self.log_line(f"Папка {_from_utf7(scan_folder)} не найдена, пропускаю")
+                        continue
+                    typ, data = conn.uid("SEARCH", "ALL")
+                    uids = data[0].split() if data[0] else []
+                    if not uids:
+                        continue
+                    self.log_line(f"Папка {_from_utf7(scan_folder)}: писем {len(uids)}")
+                    cand = []
+                    seen = 0
+                    for ch in chunks(uids, 400):
+                        for head, raw in fetch_uids(ch, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT)] BODYSTRUCTURE)"):
+                            m = re.search(rb"UID (\d+)", head)
+                            if not m:
+                                continue
+                            h = email.message_from_bytes(raw)
+                            subj = str(email.header.make_header(email.header.decode_header(h.get("Subject") or ""))).lower()
+                            frm = str(h.get("From", "")).lower()
+                            if (any(w in subj or w in frm for w in PAYSLIP_SUBJECT_WORDS)
+                                    or any(s in frm for s in senders)
+                                    or any(d in frm for d in _known_domains(addr))
+                                    or PAYSLIP_PREFIX.encode() in raw.lower()):
+                                cand.append(m.group(1))
+                        seen += len(ch)
+                        self.log_line(f"  заголовки: {seen}/{len(uids)}, кандидатов: {len(cand)}")
+                    if not cand:
+                        continue
+                    self.log_line(f"Кандидатов на полную загрузку: {len(cand)}")
                     for ch in chunks(cand, 10):
                         for head, raw in fetch_uids(ch, "(RFC822)"):
                             process_msg(email.message_from_bytes(raw))
                         if stop:
                             break
-                    _clear_checkpoint(addr)
-                else:
-                    ck = _checkpoint(addr)
-                    if ck:
-                        uids = [u for u in uids if int(u) > ck]
-                        self.log_line(f"Кандидатов нет; продолжаю сплошной скан с чекпоинта: осталось {len(uids)}")
-                    total = len(uids)
-                    for i, ch in enumerate(chunks(uids, 20), 1):
-                        self.log_line(f"  пачка {i}/{(total + 19) // 20}: {len(ch)} писем")
-                        for head, raw in fetch_uids(ch, "(RFC822)"):
-                            process_msg(email.message_from_bytes(raw))
-                        _set_checkpoint(addr, int(ch[-1]))
-                        if stop:
-                            break
-                    if not stop:
-                        _clear_checkpoint(addr)
+                    if stop:
+                        break
+                _clear_checkpoint(addr)
             if done > 0:
                 _set_last_check(addr)
         finally:

@@ -52,6 +52,19 @@ def exists(db, email_addr, filename):
         "SELECT 1 FROM payslips WHERE email=? AND filename=?",
         (email_addr, filename)).fetchone() is not None
 
+def rename_payslip(db, pid, new_filename):
+    db.execute("UPDATE payslips SET filename=? WHERE id=?", (new_filename, pid))
+    db.commit()
+
+
+def dop_plain_rows(db):
+    """Бюджетные расчетки (099), чьё имя ещё без _DOP: id, email, filename."""
+    return db.execute("""
+        SELECT p.id, p.email, p.filename FROM payslips p
+        WHERE p.filename NOT LIKE '%_DOP.pdf'
+          AND EXISTS(SELECT 1 FROM payslip_codes c
+                     WHERE c.payslip_id = p.id AND c.code = '099')
+    """).fetchall()
 
 def save(db, email_addr, filename, data):
     # апсёрт основной записи: INSERT или UPDATE на месте, id не меняется
@@ -116,6 +129,20 @@ def budget_ids(db):
     )
     return {r[0] for r in cur.fetchall()}
 
+def count_by_kind(db, email_addr=None):
+    """(обычные, доп) - количество расчеток каждого вида."""
+    where = ""
+    args = ()
+    if email_addr:
+        where = "WHERE email=?"
+        args = (email_addr,)
+    row = db.execute(f"""
+        SELECT
+          SUM(CASE WHEN filename NOT LIKE '%_DOP.pdf' THEN 1 ELSE 0 END),
+          SUM(CASE WHEN filename LIKE '%_DOP.pdf' THEN 1 ELSE 0 END)
+        FROM payslips {where}
+    """, args).fetchone()
+    return (row[0] or 0), (row[1] or 0)
 
 def get(db, payslip_id):
     cols = [c[1] for c in db.execute("PRAGMA table_info(payslips)")]
