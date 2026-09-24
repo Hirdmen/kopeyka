@@ -1750,6 +1750,9 @@ class DetailScreen(MDScreen):
             if kind == "accrual" and str(code).strip() in ("006", "6"):
                 worked = h or 0.0
                 break
+        # Доп-расчетки (099): кода 006 нет — отработанные часы равны индивиду фонду времени.
+        if not worked:
+            worked = d.get("hours") or 0.0
         summ = Card()
         summ.add_widget(
             left_label(f'[b]{d.get("period") or d["filename"]}[/b]', TEXT, "16sp")
