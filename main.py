@@ -16,6 +16,7 @@ Config.set("graphics", "multisamples", "0")
 
 import os
 import re
+import time
 import json
 import imaplib
 import email
@@ -216,7 +217,7 @@ DB_PATH = os.path.join(DATA_DIR, "salary.db")
 CONFIG = os.path.join(DATA_DIR, "config.json")
 DB_PATH = os.path.join(DATA_DIR, "salary.db")
 APP_NAME = "Расчетки"
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 try:
     from channel import CHANNEL
 except Exception:
@@ -1238,25 +1239,30 @@ class MainScreen(MDScreen):
             )
             return
         budget = storage.budget_ids(app.db)
+        narrow = Window.width < dp(420)
+        fs_main = "14sp" if narrow else "16sp"
+        fs_amt = "15sp" if narrow else "17sp"
         for pid, period, paid in rows:
             badge = f" [color={MUTE}](доп.)[/color]" if pid in budget else ""
-            row = ListRow(size_hint_y=None, height=dp(58))
+            row = ListRow(size_hint_y=None, height=dp(52) if narrow else dp(58))
             lp = Label(
                 text=f"[b]{period or 'Без периода'}[/b]{badge}",
-                markup=True, color=TEXT, font_size="16sp",
-                halign="left", valign="middle", size_hint_x=0.45,
+                markup=True, color=TEXT, font_size=fs_main,
+                halign="left", valign="middle",
+                size_hint_x=0.40 if narrow else 0.45,
             )
             lp.bind(size=lp.setter("text_size"))
-            right = BoxLayout(size_hint_x=0.55, spacing=dp(20))
+            right = BoxLayout(size_hint_x=0.60 if narrow else 0.55,
+                              spacing=dp(8) if narrow else dp(20))
             lw = Label(
-                text="Получка:", color=TEXT, font_size="16sp",
+                text="ЗП" if narrow else "Получка:", color=TEXT, font_size=fs_main,
                 halign="left", valign="middle", size_hint_x=None,
             )
             lw.bind(texture_size=lambda inst, val: setattr(inst, "width", val[0]))
             ls = Label(
-                text=f"[b][size=17sp][color={POS}]{fmt_money(paid)}[/color][/size][/b]",
-                markup=True, color=TEXT, font_size="16sp",
-                halign="left", valign="middle", size_hint_x=1,
+                text=f"[b][size={fs_amt}][color={POS}]{fmt_money(paid)}[/color][/size][/b]",
+                markup=True, color=TEXT, font_size=fs_amt,
+                halign="right", valign="middle", size_hint_x=1,
             )
             ls.bind(size=ls.setter("text_size"))
             right.add_widget(lw)
@@ -1292,13 +1298,14 @@ class MainScreen(MDScreen):
 
     def open_menu(self, *a):
         # Контейнер для всего содержимого меню
-        root_box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
-        
+        root_box = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
         # ScrollView, чтобы на маленьких экранах меню прокручивалось
-        content_box = GridLayout(cols=1, size_hint_y=None, spacing=dp(4), padding=[0, 0, 0, 0])
+        content_box = GridLayout(cols=1, size_hint_y=None, spacing=dp(4),
+                                 padding=[dp(2), 0, dp(2), 0])
         content_box.bind(minimum_height=content_box.setter("height"))
-        
-        sv = ScrollView(do_scroll_y=True, size_hint_y=1)
+        sv = ScrollView(do_scroll_y=True, size_hint_y=1, bar_width=dp(2),
+                        bar_color=(0.5, 0.5, 0.5, 0.3),
+                        bar_inactive_color=(0.5, 0.5, 0.5, 0.0))
         sv.add_widget(content_box)
         root_box.add_widget(sv)
 
@@ -1401,12 +1408,27 @@ class MainScreen(MDScreen):
     def _fetch(self, acc, full):
         addr = acc["email"]
         server = imap_server_for(addr)
-        self.log_line(f"→ Подключение к {server}...")
-        conn = imaplib.IMAP4_SSL(server, 993)
         done = 0
         stop = False
+        conn = None
+        for attempt in range(1, 7):
+            try:
+                self.log_line(f"→ Подключение к {server}..." + (f" попытка {attempt}/6" if attempt > 1 else ""))
+                conn = imaplib.IMAP4_SSL(server, 993)
+                conn.login(addr, acc["password"])
+                break
+            except (OSError, imaplib.IMAP4.error, imaplib.IMAP4.abort) as e:
+                try:
+                    if conn:
+                        conn.shutdown()
+                except Exception:
+                    pass
+                conn = None
+                if attempt == 6:
+                    raise
+                self.log_line(f"Сеть не готова: {e}. Повтор через {2 * attempt} с…")
+                time.sleep(2 * attempt)
         try:
-            conn.login(addr, acc["password"])
             folder = (acc.get("folder") or "").strip()
             if not folder:
                 folder = _auto_folder(conn) or "INBOX"
@@ -1991,13 +2013,16 @@ class SettingsScreen(MDScreen):
         self.box.add_widget(note)
 
         header("ОБНОВЛЕНИЯ")
-        row = BoxLayout(size_hint_y=None, height=dp(46))
+        narrow = Window.width < dp(420)
+        row = BoxLayout(size_hint_y=None, height=dp(64) if narrow else dp(46))
         lbl = Label(text="Проверять обновления при запуске", color=TEXT,
-                    font_size="14sp", halign="left", valign="middle")
+                    font_size="13sp" if narrow else "14sp",
+                    halign="left", valign="middle", size_hint_x=1)
         lbl.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
         row.add_widget(lbl)
         sw = Switch(active=bool(app.cfg.get("auto_update", True)),
-                    size_hint_x=None, width=dp(70))
+                    size_hint_x=None, width=dp(64) if narrow else dp(70),
+                    size_hint_y=None, height=dp(36), pos_hint={"center_y": 0.5})
         sw.bind(active=self.set_auto_update)
         row.add_widget(sw)
         self.box.add_widget(row)
