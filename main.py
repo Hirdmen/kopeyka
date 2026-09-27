@@ -1232,7 +1232,7 @@ class MainScreen(MDScreen):
             )
             return
         budget = storage.budget_ids(app.db)
-        narrow = Window.width < dp(420)
+        narrow = Window.width < dp(340)
         fs_main = "14sp" if narrow else "16sp"
         fs_amt = "15sp" if narrow else "17sp"
         for pid, period, paid in rows:
@@ -1897,11 +1897,12 @@ class DetailScreen(MDScreen):
             codes.add_widget(row)
         self.box.add_widget(codes)
 
-def open_history_popup(code, kind, months, title=None):
+def open_history_popup(code, kind, months, title=None, name=None):
     """Окно истории кода: месяцы сгруппированы по годам.
     Короткая история (<=14 строк) раскрыта целиком, длинная — по годам со свежим годом сверху.
     Кнопка Развернуть/Свернуть всё переключает одним тапом."""
     col = GREEN if kind == "accrual" else RED
+    year_hdrs = {}    
     groups = []
     idx = {}
     for period, s, h in months:
@@ -1915,7 +1916,7 @@ def open_history_popup(code, kind, months, title=None):
         state = {y: True for y, _ in groups}
     else:
         state = {y: i == 0 for i, (y, _) in enumerate(groups)}
-        year_hdrs = {}       
+       
 
     box = BoxLayout(orientation="vertical", spacing=dp(4), padding=dp(12),
                     size_hint_y=None)
@@ -1946,7 +1947,8 @@ def open_history_popup(code, kind, months, title=None):
                 for period, s, h in items:
                     r = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(8),
                                   padding=[dp(24), 0, 0, 0])
-                    r.add_widget(Label(text=period or "Без периода", color=DIM,
+                    m_text = (period or "").replace(y, "").strip() or (period or "Без периода")
+                    r.add_widget(Label(text=m_text, color=DIM,
                                        font_size="14sp", halign="left",
                                        valign="middle", size_hint_x=1))
                     h_text = _hours_view(h, code)[2] if h else ""
@@ -1990,6 +1992,11 @@ def open_history_popup(code, kind, months, title=None):
     sv = ScrollView(size_hint_y=1)
     sv.add_widget(box)
     root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+    if name:
+        nl = Label(text=name, color=DIM, font_size="13sp", halign="left",
+                   valign="middle", size_hint_y=None, height=dp(28))
+        nl.bind(size=nl.setter("text_size"))
+        root.add_widget(nl)    
     root.add_widget(sv)
     bar = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
     bar.add_widget(exp)
@@ -2062,30 +2069,37 @@ class StatsScreen(MDScreen):
         box.bind(minimum_height=box.setter("height"))
 
         def _head(text):
-            lbl = Label(text=f"[b]{text}[/b]", markup=True, color=DIM, font_size="13sp",
+            lbl = Label(text=f"[b]{text}[/b]", markup=True, color=DIM, font_size="14sp",
                         halign="left", valign="middle", size_hint_y=None, height=dp(26))
             lbl.bind(size=lbl.setter("text_size"))
             box.add_widget(lbl)
 
-        def _row(left, hours_text, summ, col):
-            r = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(8))
-            r.add_widget(Label(text=left, color=col, font_size="13sp", halign="left",
-                               valign="middle", size_hint_x=1))
-            r.add_widget(Label(text=hours_text, color=DIM, font_size="12sp",
-                               size_hint_x=None, width=dp(60), halign="right",
+        def _row(left, hours_text, summ, col, code=None, kind=None):
+            r = TapRow(size_hint_y=None, height=dp(40), spacing=dp(8))
+            lbl = Label(text=left, color=col, font_size="14sp", halign="left",
+                        valign="middle", size_hint_x=1, shorten=True,
+                        shorten_from="right")
+            lbl.bind(size=lbl.setter("text_size"))
+            r.add_widget(lbl)
+            r.add_widget(Label(text=hours_text, color=DIM, font_size="13sp",
+                               size_hint_x=None, width=dp(64), halign="right",
                                valign="middle"))
-            r.add_widget(Label(text=f"[b]{fmt_money(summ)}[/b]", markup=True, color=col,
-                               font_size="13sp", size_hint_x=None, width=dp(110),
-                               halign="right", valign="middle"))
-            for lbl in r.children:
-                lbl.bind(size=lbl.setter("text_size"))
+            r.add_widget(Label(text=f"[b]{fmt_money(summ)}[/b]", markup=True,
+                               color=col, font_size="14sp", size_hint_x=None,
+                               width=dp(120), halign="right", valign="middle"))
+            for lb in r.children:
+                lb.bind(size=lb.setter("text_size"))
+            if code is not None:
+                r.bind(on_release=lambda *a, c=code, k=kind:
+                       self._year_code_history(year, c, k))
             box.add_widget(r)
 
         _head("Основные расчетки")
         for kind, code, name, s, h in main_items:
             col = GREEN if kind == "accrual" else RED
             mark = "+" if kind == "accrual" else "−"
-            _row(f"{mark}{code} {name or ''}", _hours_view(h, code)[2] if h else "", s, col)
+            _row(f"{mark}{code} {name or ''}", _hours_view(h, code)[2] if h else "",
+                 s, col, code=code, kind=kind)
         if dop_items or dop_totals["count"]:
             _head(f"Доп. расчетки ({dop_totals['count']} шт.)")
             for nm, val, col in (
@@ -2103,7 +2117,8 @@ class StatsScreen(MDScreen):
             for kind, code, name, s, h in dop_items:
                 col = GREEN if kind == "accrual" else RED
                 mark = "+" if kind == "accrual" else "−"
-                _row(f"{mark}{code} {name or ''}", _hours_view(h, code)[2] if h else "", s, col)
+            _row(f"{mark}{code} {name or ''}", _hours_view(h, code)[2] if h else "",
+                 s, col, code=code, kind=kind)
         sv = ScrollView(size_hint_y=1)
         sv.add_widget(box)
         root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
@@ -2115,6 +2130,17 @@ class StatsScreen(MDScreen):
         popup = Popup(title=f"Подробнее за {year}", content=root, size_hint=(0.9, 0.75))
         close.bind(on_release=lambda *a: popup.dismiss())
         popup.open()
+
+    def _year_code_history(self, year, code, kind):
+        app = MDApp.get_running_app()
+        main_scr = self.manager.get_screen("main")
+        email = getattr(main_scr, "current_acc", None)
+        months = [m for m in storage.code_history(app.db, email, code)
+                  if str(year) in (m[0] or "")]
+        entry = storage.search_codes(app.db, email, str(code).strip()).get(str(code).strip())
+        name = entry["name"] if entry else ""
+        open_history_popup(code, kind, months,
+                           title=f"Код {code} за {year}", name=name)        
 
 
 class AccountForm(Card):
@@ -2633,7 +2659,7 @@ class AboutScreen(MDScreen):
         self._status("Проверяю обновления…")
         threading.Thread(target=self._update_worker, daemon=True).start()
 
-    def _update_worker(self):
+    def _update_worker(self, silent=False):
         try:
             from kivy.utils import platform as _pf
 
@@ -2642,10 +2668,9 @@ class AboutScreen(MDScreen):
             channel = CHANNEL or ("test" if is_android else "github")
             self._status(f"Канал: {channel}, проверяю GitHub…")
             rel = github_latest_release(include_pre=(channel == "test"))
-            from kivy.clock import Clock
             Clock.schedule_once(
                 lambda dt: MDApp.get_running_app().mark_upd_checked(), 0
-            )            
+            )
             tag = (rel.get("tag_name") or "").lstrip("v")
             page = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
 
@@ -2687,8 +2712,16 @@ class AboutScreen(MDScreen):
                 webbrowser.open(page)
                 return
 
+            if silent:
+                # Автопроверка: спрашиваем пользователя
+                Clock.schedule_once(lambda dt: self._ask_update(tag, rel), 0)
+                return
+
+            # Ручная проверка: качаем и ставим сразу
             self._status(f"Качаю v{tag}…")
             file_path = os.path.join(tempfile.gettempdir(), asset["name"])
+            if os.path.exists(file_path):
+                os.remove(file_path)
             urllib.request.urlretrieve(asset["browser_download_url"], file_path)
 
             if is_android:
@@ -2703,7 +2736,9 @@ class AboutScreen(MDScreen):
         except Exception as e:
             self._status(f"Ошибка обновления: {e}")
         finally:
-            Clock.schedule_once(lambda dt: setattr(self.upd_btn, "disabled", False))
+            Clock.schedule_once(
+                lambda dt: setattr(self.upd_btn, "disabled", False), 0
+            )
 
     def _publish_to_downloads(self, src_path, mime="application/vnd.android.package-archive"):
         """Публикует файл в Загрузки/Kopeyka через MediaStore (Android 10+)."""
