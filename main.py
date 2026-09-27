@@ -1568,7 +1568,7 @@ class MainScreen(MDScreen):
                 for i in range(0, len(seq), n):
                     yield seq[i:i + n]
 
-            if not full:
+            if not full and not first_run:
                 total = sum(len(us) for _, us in per_folder)
                 if first_run:
                     tail = " (база пуста: вся история отправителя)"
