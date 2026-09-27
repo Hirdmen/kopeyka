@@ -1949,14 +1949,14 @@ def open_history_popup(code, kind, months, title=None, name=None):
                                   padding=[dp(24), 0, 0, 0])
                     m_text = (period or "").replace(y, "").strip() or (period or "Без периода")
                     r.add_widget(Label(text=m_text, color=DIM,
-                                       font_size="14sp", halign="left",
+                                       font_size="16sp", halign="left",
                                        valign="middle", size_hint_x=1))
                     h_text = _hours_view(h, code)[2] if h else ""
-                    r.add_widget(Label(text=h_text, color=col, font_size="13sp",
+                    r.add_widget(Label(text=h_text, color=col, font_size="15sp",
                                        size_hint_x=None, width=dp(70), halign="right",
                                        valign="middle"))
                     r.add_widget(Label(text=f"[b]{fmt_money(s)}[/b]", markup=True,
-                                       color=col, font_size="14sp", size_hint_x=None,
+                                       color=col, font_size="16sp", size_hint_x=None,
                                        width=dp(110), halign="right", valign="middle"))
                     for lb in r.children:
                         lb.bind(size=lb.setter("text_size"))
@@ -2765,24 +2765,30 @@ class AboutScreen(MDScreen):
 
     def publish_if_missing(self, path):
         """Android: возвращает URI файла из Download/Kopeyka, копируя если нужно."""
-        from jnius import autoclass
+        from jnius import autoclass  # type: ignore
         import os
         import shutil
         
         fname = os.path.basename(path)
-        Environment = autoclass("android.os.Environment")
-        downloads_dir = os.path.join(Environment.getExternalStorageDirectory(), "Download", "Kopeyka")
+        Environment = autoclass("android.os.Environment")  # type: ignore
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity  # type: ignore
+        
+        # Правильный путь к папке Downloads на Android 10+
+        downloads_dir = os.path.join(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(),
+            "Kopeyka"
+        )
         target_path = os.path.join(downloads_dir, fname)
         
         # Проверяем напрямую в файловой системе
         if not os.path.exists(target_path):
-            # Файла нет — копируем
+            # Файла нет — копируем из приватной папки
             os.makedirs(downloads_dir, exist_ok=True)
             shutil.copy2(path, target_path)
         
         # Возвращаем URI для открытия
-        Uri = autoclass("android.net.Uri")
-        File = autoclass("java.io.File")
+        Uri = autoclass("android.net.Uri")  # type: ignore
+        File = autoclass("java.io.File")  # type: ignore
         return Uri.fromFile(File(target_path))
 
 
