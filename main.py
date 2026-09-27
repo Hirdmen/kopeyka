@@ -2763,54 +2763,27 @@ class AboutScreen(MDScreen):
             out.close()
         return uri
 
-    # MIGRATION-SYNC: временная синхронизация для миграции 1.0.4 -> 1.0.5.
-    # Удалить вместе с вызовом в build(), начиная с версии 1.0.7+.
-    def _uri_in_downloads(self, fname):
-        """Android: content-URI копии в Загрузки/Kopeyka или None."""
-        from jnius import autoclass  # type: ignore
-        Downloads = autoclass("android.provider.MediaStore$Downloads")
-        Uri = autoclass("android.net.Uri")
-        activity = autoclass("org.kivy.android.PythonActivity").mActivity
-        resolver = activity.getContentResolver()
-        cur = resolver.query(
-            Downloads.EXTERNAL_CONTENT_URI, ["_id"], "_display_name=?", [fname], None
-        )
-        uri = None
-        if cur is not None:
-            if cur.moveToFirst():
-                uri = Uri.withAppendedPath(
-                    Downloads.EXTERNAL_CONTENT_URI, str(cur.getLong(0))
-                )
-            cur.close()
-        return uri
-
     def publish_if_missing(self, path):
-        """Android: content-URI копии; публикует её, если копии ещё нет."""
-        uri = self._uri_in_downloads(os.path.basename(path))
-        if uri is None:
-            uri = self._publish_to_downloads(path, mime="application/pdf")
-        return uri
-
-    def sync_pdf_to_downloads(self):
-        """Android: допубликовывает копии всех расчеток в Загрузки/Kopeyka."""
-        if _platform != "android":
-            return 0
-        app = MDApp.get_running_app()
-        published = 0
-        rows = app.db.execute("SELECT email, filename FROM payslips").fetchall()
-        for addr, fname in rows:
-            acc = next((x for x in app.cfg["accounts"] if x["email"] == addr), None)
-            base = (acc.get("save_dir") if acc else "") or PDF_DIR
-            path = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr), fname)
-            if not os.path.exists(path):
-                continue
-            try:
-                if self._uri_in_downloads(fname) is None:
-                    if self._publish_to_downloads(path, mime="application/pdf"):
-                        published += 1
-            except Exception:
-                continue
-        return published
+        """Android: возвращает URI файла из Download/Kopeyka, копируя если нужно."""
+        from jnius import autoclass
+        import os
+        import shutil
+        
+        fname = os.path.basename(path)
+        Environment = autoclass("android.os.Environment")
+        downloads_dir = os.path.join(Environment.getExternalStorageDirectory(), "Download", "Kopeyka")
+        target_path = os.path.join(downloads_dir, fname)
+        
+        # Проверяем напрямую в файловой системе
+        if not os.path.exists(target_path):
+            # Файла нет — копируем
+            os.makedirs(downloads_dir, exist_ok=True)
+            shutil.copy2(path, target_path)
+        
+        # Возвращаем URI для открытия
+        Uri = autoclass("android.net.Uri")
+        File = autoclass("java.io.File")
+        return Uri.fromFile(File(target_path))
 
 
     def _install_apk(self, apk_path):
@@ -2942,9 +2915,7 @@ class SalaryApp(MDApp):
         self.sm.add_widget(StatsScreen(name="stats"))        
         Clock.schedule_once(lambda dt: self.auto_check(), 1.5)
         Clock.schedule_once(lambda dt: self.auto_update_check(), 3.0)        
-        threading.Thread(
-            target=self.sm.get_screen("about").sync_pdf_to_downloads, daemon=True
-        ).start()
+
         return self.sm
 
     def auto_check(self):
