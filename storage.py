@@ -234,3 +234,126 @@ def code_usage(db):
     return dict(db.execute(
         "SELECT RTRIM(code, 'П'), COUNT(DISTINCT payslip_id) "
         "FROM payslip_codes GROUP BY RTRIM(code, 'П')"))
+def email_of(db, payslip_id):
+    row = db.execute("SELECT email FROM payslips WHERE id=?", (payslip_id,)).fetchone()
+    return row[0] if row else None
+
+
+def code_history(db, email_addr, code):
+    """[(period, sum, hours)] по коду (П схлопнут в базовый), от новых к старым."""
+    base = str(code).strip()
+    if base.endswith('П'):
+        base = base[:-1]
+    rows = db.execute(
+        """SELECT p.period AS period, pc.sum, pc.hours
+           FROM payslip_codes pc
+           JOIN payslips p ON p.id = pc.payslip_id
+           WHERE p.email=? AND RTRIM(pc.code, 'П')=?""",
+        (email_addr, base)).fetchall()
+    rows = sorted(rows, key=lambda r: _period_key((0, r[0])), reverse=True)
+    return [(r[0], r[1], r[2]) for r in rows]
+
+
+def yearly_stats(db, email_addr):
+    """[(метка, статистика)] по годам сверху вниз (новые сначала) + итог внизу.
+    статистика: hours, accrued, ndfl, advance, sick, vac_days, paid, count."""
+    totals = {}
+    for pid, period in db.execute(
+            "SELECT id, period FROM payslips WHERE email=?", (email_addr,)).fetchall():
+        d = get(db, pid)
+        if not d:
+            continue
+        m = re.search(r"(20\d{2})", period or "")
+        year = int(m.group(1)) if m else 0
+        st = totals.get(year)
+        if st is None:
+            st = totals[year] = {"hours": 0.0, "accrued": 0.0, "ndfl": 0.0,
+                                 "advance": 0.0, "sick": 0.0, "vac_days": 0.0,
+                                 "paid": 0.0, "count": 0}
+        worked = 0.0
+        for kind, code, name, s, h in d.get("codes", []):
+            nm = (name or "").lower()
+            if kind == "accrual":
+                if str(code).strip() in ("006", "6"):
+                    worked = h or 0.0
+                if "отпуск" in nm:
+                    st["vac_days"] += h or 0.0
+            else:
+                if "ндфл" in nm:
+                    st["ndfl"] += s or 0.0
+                if "аванс" in nm:
+                    st["advance"] += s or 0.0
+                if "больнич" in nm:
+                    st["sick"] += s or 0.0
+        if not worked:
+            worked = d.get("hours") or 0.0
+        st["hours"] += worked
+        st["accrued"] += d.get("accrued") or 0.0
+        st["paid"] += d.get("paid") or 0.0
+        st["count"] += 1
+    out = []
+    allst = {"hours": 0.0, "accrued": 0.0, "ndfl": 0.0, "advance": 0.0,
+             "sick": 0.0, "vac_days": 0.0, "paid": 0.0, "count": 0}
+    for y in sorted(totals, reverse=True):
+        st = totals[y]
+        for k in allst:
+            allst[k] += st[k]
+        out.append((str(y), st))
+    out.append(("За весь период", allst))
+    return out
+
+def year_codes(db, email_addr, year):
+    """(main_items, dop_items, dop_totals) по году.
+    items: [(kind, code, name, sum, hours)]; totals: hours/accrued/paid/count допов."""
+    bset = set(budget_ids(db))
+    main_agg = {}
+    dop_agg = {}
+    dop_totals = {"hours": 0.0, "accrued": 0.0, "paid": 0.0, "count": 0}
+    for pid, period in db.execute(
+            "SELECT id, period FROM payslips WHERE email=?", (email_addr,)).fetchall():
+        m = re.search(r"(20\d{2})", period or "")
+        if not m or int(m.group(1)) != year:
+            continue
+        d = get(db, pid)
+        if not d:
+            continue
+        is_dop = pid in bset
+        agg = dop_agg if is_dop else main_agg
+        if is_dop:
+            dop_totals["hours"] += d.get("hours") or 0.0
+            dop_totals["accrued"] += d.get("accrued") or 0.0
+            dop_totals["paid"] += d.get("paid") or 0.0
+            dop_totals["count"] += 1
+        for kind, code, name, s, h in d.get("codes", []):
+            key = (kind, str(code).strip())
+            a = agg.setdefault(key, {"name": name, "sum": 0.0, "hours": 0.0})
+            a["sum"] += s or 0.0
+            a["hours"] += h or 0.0
+
+    def _items(agg):
+        out = [(k[0], k[1], v["name"], v["sum"], v["hours"]) for k, v in agg.items()]
+        out.sort(key=lambda t: (t[0] != "accrual", t[1]))
+        return out
+
+    return _items(main_agg), _items(dop_agg), dop_totals
+
+def search_codes(db, email_addr, query):
+    """{code: {name, kind, count, months:[(period, sum, hours)]}} по коду или подстроке имени.
+    Пустой запрос — все коды ящика. Месяцы от новых к старым."""
+    q = (query or "").strip().lower()
+    out = {}
+    for pid, period in db.execute(
+            "SELECT id, period FROM payslips WHERE email=?", (email_addr,)).fetchall():
+        d = get(db, pid)
+        if not d:
+            continue
+        for kind, code, name, s, h in d.get("codes", []):
+            c = str(code).strip()
+            if q and q not in c.lower() and q not in (name or "").lower():
+                continue
+            e = out.setdefault(c, {"name": name, "kind": kind, "count": 0, "months": []})
+            e["count"] += 1
+            e["months"].append((period, s, h))
+    for e in out.values():
+        e["months"].sort(key=lambda t: _period_key((0, t[0])), reverse=True)
+    return out

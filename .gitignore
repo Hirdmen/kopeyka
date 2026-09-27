@@ -18,7 +18,4 @@ runmain.bat
 *.bat
 channel.py
 imap_checkpoint.json
-imap_senders.json
-*.pyc
-__pycache__/
 .kivy/

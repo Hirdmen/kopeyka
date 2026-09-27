@@ -2642,6 +2642,10 @@ class AboutScreen(MDScreen):
             channel = CHANNEL or ("test" if is_android else "github")
             self._status(f"Канал: {channel}, проверяю GitHub…")
             rel = github_latest_release(include_pre=(channel == "test"))
+            from kivy.clock import Clock
+            Clock.schedule_once(
+                lambda dt: MDApp.get_running_app().mark_upd_checked(), 0
+            )            
             tag = (rel.get("tag_name") or "").lstrip("v")
             page = rel.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
 
@@ -2902,14 +2906,13 @@ class SalaryApp(MDApp):
         self.sm.add_widget(AboutScreen(name="about"))
         self.sm.add_widget(StatsScreen(name="stats"))        
         Clock.schedule_once(lambda dt: self.auto_check(), 1.5)
+        Clock.schedule_once(lambda dt: self.auto_update_check(), 3.0)        
         threading.Thread(
             target=self.sm.get_screen("about").sync_pdf_to_downloads, daemon=True
         ).start()
         return self.sm
 
     def auto_check(self):
-        if not self.cfg.get("auto_update", True):
-            return
         try:
             import datetime
 
@@ -2937,6 +2940,21 @@ class SalaryApp(MDApp):
                 self.sm.get_screen("main").log_line(f"Автопроверка не сработала: {e}")
             except Exception:
                 pass
+
+    def mark_upd_checked(self):
+        import datetime
+        self.cfg["upd_last_day"] = str(datetime.date.today())            
+
+    def auto_update_check(self):
+        """Раз в день при первом УДАЧНОМ запуске проверки: версия и предложение установки.
+        Отключается тумблером «Проверять обновления при запуске».
+        Если сети не было — день остаётся непроверенным, следующий запуск повторит."""
+        if not self.cfg.get("auto_update", True):
+            return
+        import datetime
+        if self.cfg.get("upd_last_day") == str(datetime.date.today()):
+            return
+        self.sm.get_screen("about").do_update()          
 
     def on_stop(self):
         self.db.close()
