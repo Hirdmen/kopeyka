@@ -3,7 +3,7 @@
 title = Копейка
 package.name = kopeyka
 package.domain = org.kopeyka
-version = 1.0.4
+version = 1.0.6
 icon.filename = %(source.dir)s/icon.png
 presplash.filename = %(source.dir)s/presplash.png
 
