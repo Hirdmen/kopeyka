@@ -2498,6 +2498,10 @@ class CodesScreen(MDScreen):
 
 class AboutScreen(MDScreen):
     def __init__(self, **kwargs):
+        print("!!! КОПЕЙКА 2026: НОВАЯ ВЕРСИЯ УСПЕШНО ЗАГРУЖЕНА !!!")
+        super().__init__(**kwargs)
+        # ... дальше идет старый код
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         root = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(6))
         root.add_widget(TopBar("О программе", back_cb=self.back))
