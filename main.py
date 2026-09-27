@@ -2769,27 +2769,67 @@ class AboutScreen(MDScreen):
         import os
         import shutil
         
+        app = MDApp.get_running_app()
         fname = os.path.basename(path)
-        Environment = autoclass("android.os.Environment")  # type: ignore
-        activity = autoclass("org.kivy.android.PythonActivity").mActivity  # type: ignore
         
-        # Правильный путь к папке Downloads на Android 10+
-        downloads_dir = os.path.join(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(),
-            "Kopeyka"
-        )
-        target_path = os.path.join(downloads_dir, fname)
-        
-        # Проверяем напрямую в файловой системе
-        if not os.path.exists(target_path):
-            # Файла нет — копируем из приватной папки
-            os.makedirs(downloads_dir, exist_ok=True)
-            shutil.copy2(path, target_path)
-        
-        # Возвращаем URI для открытия
-        Uri = autoclass("android.net.Uri")  # type: ignore
-        File = autoclass("java.io.File")  # type: ignore
-        return Uri.fromFile(File(target_path))
+        try:
+            Environment = autoclass("android.os.Environment")  # type: ignore
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity  # type: ignore
+            
+            # Правильный путь к публичной папке Downloads на Android
+            downloads_dir = os.path.join(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(),
+                "Kopeyka"
+            )
+            target_path = os.path.join(downloads_dir, fname)
+            
+            # Логируем для отладки
+            if app:
+                try:
+                    app.sm.get_screen("main").log_line(f"[PDF] Проверяю: {target_path}")
+                except:
+                    pass
+            
+            # Проверяем напрямую в файловой системе
+            if not os.path.exists(target_path):
+                # Логируем
+                if app:
+                    try:
+                        app.sm.get_screen("main").log_line(f"[PDF] Файла нет, копирую из: {path}")
+                    except:
+                        pass
+                
+                os.makedirs(downloads_dir, exist_ok=True)
+                shutil.copy2(path, target_path)
+                
+                # Проверяем, что скопировалось
+                if not os.path.exists(target_path):
+                    if app:
+                        try:
+                            app.sm.get_screen("main").log_line(f"[PDF] ОШИБКА: копирование не удалось!")
+                        except:
+                            pass
+                    return None
+            
+            # Возвращаем URI для открытия
+            Uri = autoclass("android.net.Uri")  # type: ignore
+            File = autoclass("java.io.File")  # type: ignore
+            uri = Uri.fromFile(File(target_path))
+            
+            if app:
+                try:
+                    app.sm.get_screen("main").log_line(f"[PDF] URI: {uri}")
+                except:
+                    pass
+            
+            return uri
+        except Exception as e:
+            if app:
+                try:
+                    app.sm.get_screen("main").log_line(f"[PDF] Исключение: {e}")
+                except:
+                    pass
+            return None
 
 
     def _install_apk(self, apk_path):
