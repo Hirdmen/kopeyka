@@ -2740,17 +2740,38 @@ class AboutScreen(MDScreen):
                 lambda dt: setattr(self.upd_btn, "disabled", False), 0
             )
 
-    def _publish_to_downloads(self, src_path, mime="application/vnd.android.package-archive"):
+    def _uri_in_downloads(self, fname):
+        """Android: content-URI копии в Загрузки/Kopeyka или None."""
+        from jnius import autoclass  # type: ignore
+        Downloads = autoclass("android.provider.MediaStore$Downloads")
+        Uri = autoclass("android.net.Uri")
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        resolver = activity.getContentResolver()
+        cur = resolver.query(
+            Downloads.EXTERNAL_CONTENT_URI, ["_id"], "_display_name=?", [fname], None
+        )
+        uri = None
+        if cur is not None:
+            if cur.moveToFirst():
+                uri = Uri.withAppendedPath(
+                    Downloads.EXTERNAL_CONTENT_URI, str(cur.getLong(0))
+                )
+            cur.close()
+        return uri
+
+    def _publish_to_downloads(self, src_path, mime="application/pdf"):
         """Публикует файл в Загрузки/Kopeyka через MediaStore (Android 10+)."""
         from jnius import autoclass  # type: ignore
         ContentValues = autoclass("android.content.ContentValues")
         Downloads = autoclass("android.provider.MediaStore$Downloads")
         Environment = autoclass("android.os.Environment")
         activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        
         values = ContentValues()
         values.put("_display_name", os.path.basename(src_path))
-        values.put("mime_type", mime)
+        values.put("mime_type", mime)  # Здесь теперь правильный "application/pdf"
         values.put("relative_path", Environment.DIRECTORY_DOWNLOADS + "/Kopeyka")
+        
         resolver = activity.getContentResolver()
         uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values)
         if uri is None:
@@ -2764,73 +2785,32 @@ class AboutScreen(MDScreen):
         return uri
 
     def publish_if_missing(self, path):
-        """Android: возвращает URI файла из Download/Kopeyka, копируя если нужно."""
-        from jnius import autoclass  # type: ignore
-        import os
-        import shutil
-        
-        app = MDApp.get_running_app()
-        fname = os.path.basename(path)
-        
-        try:
-            Environment = autoclass("android.os.Environment")  # type: ignore
-            activity = autoclass("org.kivy.android.PythonActivity").mActivity  # type: ignore
-            
-            # Правильный путь к публичной папке Downloads на Android
-            downloads_dir = os.path.join(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath(),
-                "Kopeyka"
-            )
-            target_path = os.path.join(downloads_dir, fname)
-            
-            # Логируем для отладки
-            if app:
-                try:
-                    app.sm.get_screen("main").log_line(f"[PDF] Проверяю: {target_path}")
-                except:
-                    pass
-            
-            # Проверяем напрямую в файловой системе
-            if not os.path.exists(target_path):
-                # Логируем
-                if app:
-                    try:
-                        app.sm.get_screen("main").log_line(f"[PDF] Файла нет, копирую из: {path}")
-                    except:
-                        pass
-                
-                os.makedirs(downloads_dir, exist_ok=True)
-                shutil.copy2(path, target_path)
-                
-                # Проверяем, что скопировалось
-                if not os.path.exists(target_path):
-                    if app:
-                        try:
-                            app.sm.get_screen("main").log_line(f"[PDF] ОШИБКА: копирование не удалось!")
-                        except:
-                            pass
-                    return None
-            
-            # Возвращаем URI для открытия
-            Uri = autoclass("android.net.Uri")  # type: ignore
-            File = autoclass("java.io.File")  # type: ignore
-            uri = Uri.fromFile(File(target_path))
-            
-            if app:
-                try:
-                    app.sm.get_screen("main").log_line(f"[PDF] URI: {uri}")
-                except:
-                    pass
-            
-            return uri
-        except Exception as e:
-            if app:
-                try:
-                    app.sm.get_screen("main").log_line(f"[PDF] Исключение: {e}")
-                except:
-                    pass
-            return None
+        """Android: content-URI копии; публикует её, если копии ещё нет."""
+        uri = self._uri_in_downloads(os.path.basename(path))
+        if uri is None:
+            uri = self._publish_to_downloads(path, mime="application/pdf")
+        return uri
 
+    def sync_pdf_to_downloads(self):
+        """Android: допубликовывает копии всех расчеток в Загрузки/Kopeyka."""
+        if _platform != "android":
+            return 0
+        app = MDApp.get_running_app()
+        published = 0
+        rows = app.db.execute("SELECT email, filename FROM payslips").fetchall()
+        for addr, fname in rows:
+            acc = next((x for x in app.cfg["accounts"] if x["email"] == addr), None)
+            base = (acc.get("save_dir") if acc else "") or PDF_DIR
+            path = os.path.join(base, re.sub(r"[^\w.@-]", "_", addr), fname)
+            if not os.path.exists(path):
+                continue
+            try:
+                if self._uri_in_downloads(fname) is None:
+                    if self._publish_to_downloads(path, mime="application/pdf"):
+                        published += 1
+            except Exception:
+                continue
+        return published
 
     def _install_apk(self, apk_path):
         """Установка APK через системный установщик Android."""
