@@ -2751,16 +2751,33 @@ class AboutScreen(MDScreen):
         Uri = autoclass("android.net.Uri")
         activity = autoclass("org.kivy.android.PythonActivity").mActivity
         resolver = activity.getContentResolver()
+        
+        # Ищем файлы по шаблону: Rasch_list_02112024.pdf, Rasch_list_02112024 (2).pdf и т.д.
+        base_name = fname.replace(".pdf", "")
+        pattern = base_name + "%"
+        
         cur = resolver.query(
-            Downloads.EXTERNAL_CONTENT_URI, ["_id"], "_display_name=?", [fname], None
+            Downloads.EXTERNAL_CONTENT_URI, ["_id", "_display_name"], 
+            "_display_name LIKE ?", [pattern], None
         )
         uri = None
         if cur is not None:
-            if cur.moveToFirst():
-                uri = Uri.withAppendedPath(
-                    Downloads.EXTERNAL_CONTENT_URI, str(cur.getLong(0))
-                )
+            # Ищем точное совпадение (без суффикса) или первый найденный
+            exact_match = None
+            first_match = None
+            while cur.moveToNext():
+                display_name = cur.getString(cur.getColumnIndex("_display_name"))
+                if display_name == fname:
+                    exact_match = Uri.withAppendedPath(
+                        Downloads.EXTERNAL_CONTENT_URI, str(cur.getLong(cur.getColumnIndex("_id")))
+                    )
+                    break
+                if first_match is None:
+                    first_match = Uri.withAppendedPath(
+                        Downloads.EXTERNAL_CONTENT_URI, str(cur.getLong(cur.getColumnIndex("_id")))
+                    )
             cur.close()
+            uri = exact_match or first_match
         return uri
 
     def _publish_to_downloads(self, src_path, mime="application/pdf"):
