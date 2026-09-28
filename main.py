@@ -1827,7 +1827,7 @@ class DetailScreen(MDScreen):
             app = MDApp.get_running_app()
             email = storage.email_of(app.db, app.current_detail)
             months = storage.code_history(app.db, email, code)
-            open_history_popup(code, kind, months)
+            open_history_popup(code, kind, months, name=name)
 
         for kind, code, name, s, h in d.get("codes", []):
             col = GREEN if kind == "accrual" else RED
@@ -1991,19 +1991,15 @@ def open_history_popup(code, kind, months, title=None, name=None):
     rebuild()
     sv = ScrollView(size_hint_y=1)
     sv.add_widget(box)
-    root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
-    if name:
-        nl = Label(text=name, color=DIM, font_size="13sp", halign="left",
-                   valign="middle", size_hint_y=None, height=dp(28))
-        nl.bind(size=nl.setter("text_size"))
-        root.add_widget(nl)    
+    root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))    
     root.add_widget(sv)
     bar = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
     bar.add_widget(exp)
     bar.add_widget(close)
     root.add_widget(bar)
-    popup = Popup(title=title or f"История кода {code}", content=root,
-                  size_hint=(0.9, 0.7))
+    base_title = title or f"История кода {code}"
+    title_text = f"{base_title} — {name}" if name else base_title
+    popup = Popup(title=title_text, content=root, size_hint=(0.9, 0.7))
     close.bind(on_release=lambda *a: popup.dismiss())
     popup.open()
 
@@ -2058,6 +2054,10 @@ class StatsScreen(MDScreen):
                 b = AccentButton(text="Подробнее за год", size_hint_y=None, height=dp(40))
                 b.bind(on_release=lambda *a, y=label: self._show_year_codes(y))
                 card.add_widget(b)
+            else:
+                b2 = AccentButton(text="Подробнее за весь период", size_hint_y=None, height=dp(40))
+                b2.bind(on_release=lambda *a: self._show_all_time_codes())
+                card.add_widget(b2)
             self.inner.add_widget(card)                                
     def _show_year_codes(self, year):
         app = MDApp.get_running_app()
@@ -2142,6 +2142,87 @@ class StatsScreen(MDScreen):
         open_history_popup(code, kind, months,
                            title=f"Код {code} за {year}", name=name)        
 
+    def _show_all_time_codes(self):
+        app = MDApp.get_running_app()
+        main_scr = self.manager.get_screen("main")
+        email = getattr(main_scr, "current_acc", None)
+        main_items, dop_items, dop_totals = storage.all_time_codes(app.db, email)
+        box = BoxLayout(orientation="vertical", spacing=dp(4), padding=dp(12),
+                        size_hint_y=None)
+        box.bind(minimum_height=box.setter("height"))
+
+        def _head(text):
+            lbl = Label(text=f"[b]{text}[/b]", markup=True, color=DIM, font_size="14sp",
+                        halign="left", valign="middle", size_hint_y=None, height=dp(26))
+            lbl.bind(size=lbl.setter("text_size"))
+            box.add_widget(lbl)
+
+        def _row(left, hours_text, summ, col, code=None, kind=None):
+            r = TapRow(size_hint_y=None, height=dp(40), spacing=dp(8))
+            lbl = Label(text=left, color=col, font_size="14sp", halign="left",
+                        valign="middle", size_hint_x=1, shorten=True,
+                        shorten_from="right")
+            lbl.bind(size=lbl.setter("text_size"))
+            r.add_widget(lbl)
+            r.add_widget(Label(text=hours_text, color=DIM, font_size="13sp",
+                               size_hint_x=None, width=dp(64), halign="right",
+                               valign="middle"))
+            r.add_widget(Label(text=f"[b]{fmt_money(summ)}[/b]", markup=True,
+                               color=col, font_size="14sp", size_hint_x=None,
+                               width=dp(120), halign="right", valign="middle"))
+            for lb in r.children:
+                lb.bind(size=lb.setter("text_size"))
+            if code is not None:
+                r.bind(on_release=lambda *a, c=code, k=kind:
+                       self._all_time_code_history(c, k))
+            box.add_widget(r)
+
+        _head("Основные расчетки")
+        for kind, code, name, s, h in main_items:
+            col = GREEN if kind == "accrual" else RED
+            mark = "+" if kind == "accrual" else "−"
+            _row(f"{mark}{code} {name or ''}", _hours_view(h, code)[2] if h else "",
+                 s, col, code=code, kind=kind)
+        if dop_items or dop_totals["count"]:
+            _head(f"Доп. расчетки ({dop_totals['count']} шт.)")
+            for nm, val, col in (
+                ("Отработано (фонд времени)", f"{dop_totals['hours']:.1f} ч", TEXT),
+                ("Начислено", fmt_money(dop_totals['accrued']), GREEN),
+                ("Получено", fmt_money(dop_totals['paid']), GREEN),
+            ):
+                g = GridLayout(cols=2, size_hint_y=None, height=dp(28))
+                g.add_widget(left_label(nm, DIM))
+                v = Label(text=f"[b]{val}[/b]", markup=True, color=col, font_size="13sp",
+                          halign="right", valign="middle")
+                v.bind(size=v.setter("text_size"))
+                g.add_widget(v)
+                box.add_widget(g)
+            for kind, code, name, s, h in dop_items:
+                col = GREEN if kind == "accrual" else RED
+                mark = "+" if kind == "accrual" else "−"
+                _row(f"{mark}{code} {name or ''}", _hours_view(h, code)[2] if h else "",
+                     s, col, code=code, kind=kind)
+        sv = ScrollView(size_hint_y=1)
+        sv.add_widget(box)
+        root = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(8))
+        root.add_widget(sv)
+        bar = BoxLayout(size_hint_y=None, height=dp(44))
+        close = AccentButton(text="Закрыть")
+        bar.add_widget(close)
+        root.add_widget(bar)
+        popup = Popup(title="Подробнее за весь период", content=root, size_hint=(0.9, 0.75))
+        close.bind(on_release=lambda *a: popup.dismiss())
+        popup.open()
+
+    def _all_time_code_history(self, code, kind):
+        app = MDApp.get_running_app()
+        main_scr = self.manager.get_screen("main")
+        email = getattr(main_scr, "current_acc", None)
+        months = storage.code_history(app.db, email, code)
+        entry = storage.search_codes(app.db, email, str(code).strip()).get(str(code).strip())
+        name = entry["name"] if entry else ""
+        open_history_popup(code, kind, months,
+                           title=f"Код {code} — весь период", name=name)
 
 class AccountForm(Card):
     def __init__(self, data=None, **kw):
@@ -2452,8 +2533,9 @@ class CodesScreen(MDScreen):
         c = str(code).strip()
         entry = storage.search_codes(app.db, email, c).get(c)
         kind = entry["kind"] if entry else "accrual"
+        name = entry["name"] if entry else ""
         months = storage.code_history(app.db, email, c)
-        open_history_popup(c, kind, months)         
+        open_history_popup(c, kind, months, name=name)         
 
     def show_code(self, code):
         app = MDApp.get_running_app()
