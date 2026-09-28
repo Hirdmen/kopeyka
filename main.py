@@ -1413,6 +1413,58 @@ class MainScreen(MDScreen):
             return
         threading.Thread(target=self._worker, args=(acc, full), daemon=True).start()
 
+    def _show_folder_not_found_popup(self, folder, hint_folders):
+        app = MDApp.get_running_app()
+        box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
+        box.add_widget(
+            left_label(
+                f"[color={NEG}]⚠ Папка не найдена[/color]\n\n"
+                f"На сервере нет папки [b]{folder}[/b].\n\n"
+                f"Возможные варианты:\n" +
+                ("\n".join(f"• {f}" for f in (hint_folders or [])[:8]) or "— список пуст —") +
+                (f"\n… и ещё {len(hint_folders) - 8}" if hint_folders and len(hint_folders) > 8 else ""),
+                TEXT,
+                "14sp",
+            )
+        )
+        buttons = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+
+        def _search_all(*a):
+            popup.dismiss()
+            for acc in app.cfg["accounts"]:
+                if acc["email"] == self.current_acc:
+                    acc["folder"] = ""
+                    break
+            save_config(app.cfg)
+            self.log_line("Папка очищена — проверяю во всех папках…")
+            self.check_mail(False)
+
+        def _open_settings(*a):
+            popup.dismiss()
+            self.manager.current = "accounts"
+
+        def _cancel(*a):
+            popup.dismiss()
+
+        btn_search = AccentButton(text="Искать во всех папках")
+        btn_search.bind(on_release=_search_all)
+        btn_settings = AccentButton(text="Открыть настройки")
+        btn_settings.bind(on_release=_open_settings)
+        btn_cancel = AccentButton(text="Отмена")
+        btn_cancel.bind(on_release=_cancel)
+        buttons.add_widget(btn_search)
+        buttons.add_widget(btn_settings)
+        buttons.add_widget(btn_cancel)
+        box.add_widget(buttons)
+
+        popup = Popup(
+            title="Проблема с папкой",
+            content=box,
+            size_hint=(0.92, 0.7),
+            auto_dismiss=False,
+        )
+        popup.open()
+
     def _worker(self, acc, full):
         try:
             self._fetch(acc, full)
@@ -1484,13 +1536,14 @@ class MainScreen(MDScreen):
 
             def folder_names_hint():
                 _, dirs = conn.list()
-                names = []
+                pairs = []
                 for d in dirs or []:
                     line = d.decode("utf-8")
                     match = re.match(r'\([^)]*\)\s+"(.)"\s+"(.+)"$', line)
                     if match:
-                        names.append(_from_utf7(match.group(2)))
-                return names
+                        pairs.append((match.group(1), _from_utf7(match.group(2))))
+                roots = [n for dl, n in pairs if dl not in n]
+                return roots or [n for _, n in pairs]
 
             app = MDApp.get_running_app()
             first_run = not storage.list_payslips(app.db, addr)
@@ -1503,7 +1556,12 @@ class MainScreen(MDScreen):
                 for scan_folder in folders_to_scan:
                     if not select_folder(scan_folder):
                         if folder:
-                            raise Exception(f'Папка "{folder}" не найдена. На сервере: {folder_names_hint()}')
+                            Clock.schedule_once(
+                                lambda dt, f=folder, h=folder_names_hint():
+                                    self._show_folder_not_found_popup(f, h),
+                                0
+                            )
+                            return  # выходим из _fetch без ошибки
                         self.log_line(f"Папка недоступна, пропускаю: {scan_folder}")
                         continue
                     keys = []
@@ -1520,7 +1578,12 @@ class MainScreen(MDScreen):
                         per_folder.append((scan_folder, us))
             else:
                 if not select_folder(folders_to_scan[0]):
-                    raise Exception(f'Папка "{folders_to_scan[0]}" не найдена. На сервере: {folder_names_hint()}')
+                    Clock.schedule_once(
+                        lambda dt, f=folders_to_scan[0], h=folder_names_hint():
+                            self._show_folder_not_found_popup(f, h),
+                        0
+                    )
+                    return  # выходим из _fetch без ошибки
             run_saved = set()
             def process_msg(msg):
                 nonlocal done, stop
