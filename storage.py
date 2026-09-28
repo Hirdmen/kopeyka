@@ -337,6 +337,37 @@ def year_codes(db, email_addr, year):
 
     return _items(main_agg), _items(dop_agg), dop_totals
 
+def all_time_codes(db, email_addr):
+    """(main_items, dop_items, dop_totals) за весь период."""
+    bset = set(budget_ids(db))
+    main_agg = {}
+    dop_agg = {}
+    dop_totals = {"hours": 0.0, "accrued": 0.0, "paid": 0.0, "count": 0}
+    for pid, period in db.execute(
+            "SELECT id, period FROM payslips WHERE email=?", (email_addr,)).fetchall():
+        d = get(db, pid)
+        if not d:
+            continue
+        is_dop = pid in bset
+        agg = dop_agg if is_dop else main_agg
+        if is_dop:
+            dop_totals["hours"] += d.get("hours") or 0.0
+            dop_totals["accrued"] += d.get("accrued") or 0.0
+            dop_totals["paid"] += d.get("paid") or 0.0
+            dop_totals["count"] += 1
+        for kind, code, name, s, h in d.get("codes", []):
+            key = (kind, str(code).strip())
+            a = agg.setdefault(key, {"name": name, "sum": 0.0, "hours": 0.0})
+            a["sum"] += s or 0.0
+            a["hours"] += h or 0.0
+
+    def _items(agg):
+        out = [(k[0], k[1], v["name"], v["sum"], v["hours"]) for k, v in agg.items()]
+        out.sort(key=lambda t: (t[0] != "accrual", t[1]))
+        return out
+
+    return _items(main_agg), _items(dop_agg), dop_totals
+
 def search_codes(db, email_addr, query):
     """{code: {name, kind, count, months:[(period, sum, hours)]}} по коду или подстроке имени.
     Пустой запрос — все коды ящика. Месяцы от новых к старым."""
