@@ -1227,9 +1227,30 @@ class MainScreen(MDScreen):
         self.list_box.clear_widgets()
         rows = storage.list_payslips(app.db, self.current_acc)
         if not rows:
-            self.list_box.add_widget(
-                left_label("Пока пусто. Добавьте почту и нажмите «Проверить».", DIM)
+            hint = left_label(
+                "Пока пусто. Как начать:\n"
+                "\n"
+                "1. Меню — Настройки — Почтовые ящики\n"
+                "2. Нажмите «Добавить почту» внизу\n"
+                "\n"
+                "Заполните поля:\n"
+                "• Email\n"
+                "• Пароль приложения (IMAP)\n"
+                "• Пароль от PDF расчеток\n"
+                "и нажмите «Сохранить».\n"
+                "\n"
+                "Если что-то непонятно —\n"
+                "в меню есть «Инструкция по настройке».\n"
+                "\n"
+                "Когда почта добавлена — нажмите «Проверить».",
+                DIM,
+                "14sp",
             )
+            hint.size_hint_y = None
+            hint.valign = "top"
+            hint.bind(size=lambda i, v: setattr(i, "text_size", (v[0], None)))
+            hint.bind(texture_size=lambda i, v: setattr(i, "height", v[1]))
+            self.list_box.add_widget(hint)
             return
         budget = storage.budget_ids(app.db)
         narrow = Window.width < dp(340)
