@@ -1159,12 +1159,19 @@ class MainScreen(MDScreen):
     def confirm_reparse(self, *a):
         """Подтверждение перескачивания (полная проверка)."""
         box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
-        box.add_widget(Label(
+        msg = Label(
             text="Заново пройти всю историю почты?\nОперация долгая, уже скачанное не дублируется.",
             color=TEXT,
             font_size="16sp",
             halign="center",
-        ))
+            valign="center",
+        )
+
+        def _wrap_msg(inst, w):
+            inst.text_size = (w, None)
+
+        msg.bind(width=_wrap_msg)
+        box.add_widget(msg)
         btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
         yes_btn = AccentButton(text="Да, перескачать")
         no_btn = AccentButton(text="Отмена")
@@ -1415,19 +1422,22 @@ class MainScreen(MDScreen):
 
     def _show_folder_not_found_popup(self, folder, hint_folders):
         app = MDApp.get_running_app()
-        box = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
-        box.add_widget(
-            left_label(
-                f"[color={NEG}]⚠ Папка не найдена[/color]\n\n"
-                f"На сервере нет папки [b]{folder}[/b].\n\n"
-                f"Возможные варианты:\n" +
-                ("\n".join(f"• {f}" for f in (hint_folders or [])[:8]) or "— список пуст —") +
-                (f"\n… и ещё {len(hint_folders) - 8}" if hint_folders and len(hint_folders) > 8 else ""),
-                TEXT,
-                "14sp",
-            )
+        root = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
+        lbl = left_label(
+            f"[color={NEG}]⚠ Папка не найдена[/color]\n\n"
+            f"На сервере нет папки [b]{folder}[/b].\n\n"
+            f"Возможные варианты:\n" +
+            ("\n".join(f"• {f}" for f in (hint_folders or [])[:8]) or "— список пуст —") +
+            (f"\n… и ещё {len(hint_folders) - 8}" if hint_folders and len(hint_folders) > 8 else ""),
+            TEXT,
+            "14sp",
         )
-        buttons = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        lbl.size_hint_y = None
+        lbl.bind(texture_size=lambda inst, val: setattr(inst, "height", val[1]))
+        scroll = ScrollView(do_scroll_x=False)
+        scroll.add_widget(lbl)
+        root.add_widget(scroll)
+        buttons = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(48 * 3 + dp(8) * 2), spacing=dp(8))
 
         def _search_all(*a):
             popup.dismiss()
@@ -1446,20 +1456,20 @@ class MainScreen(MDScreen):
         def _cancel(*a):
             popup.dismiss()
 
-        btn_search = AccentButton(text="Искать во всех папках")
+        btn_search = AccentButton(text="Искать во всех папках", size_hint_y=None, height=dp(48))
         btn_search.bind(on_release=_search_all)
-        btn_settings = AccentButton(text="Открыть настройки")
+        btn_settings = AccentButton(text="Открыть настройки", size_hint_y=None, height=dp(48))
         btn_settings.bind(on_release=_open_settings)
-        btn_cancel = AccentButton(text="Отмена")
+        btn_cancel = AccentButton(text="Отмена", size_hint_y=None, height=dp(48))
         btn_cancel.bind(on_release=_cancel)
         buttons.add_widget(btn_search)
         buttons.add_widget(btn_settings)
         buttons.add_widget(btn_cancel)
-        box.add_widget(buttons)
+        root.add_widget(buttons)
 
         popup = Popup(
             title="Проблема с папкой",
-            content=box,
+            content=root,
             size_hint=(0.92, 0.7),
             auto_dismiss=False,
         )
