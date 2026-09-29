@@ -1466,23 +1466,44 @@ class MainScreen(MDScreen):
         popup.open()
 
     def _worker(self, acc, full):
-        try:
-            self._fetch(acc, full)
-        except Exception as e:
-            self.log_line(f'Ошибка {acc["email"]}: {e}')
+        reconnects = 0
+        no_stop = False
+        while True:
+            try:
+                self._fetch(acc, full, no_stop=no_stop)
+                break
+            except (OSError, imaplib.IMAP4.abort, imaplib.IMAP4.error) as e:
+                is_conn = isinstance(e, (OSError, imaplib.IMAP4.abort)) or (
+                    "connection" in str(e).lower()
+                )
+                if not (is_conn and getattr(self, "_conn_ok", False)
+                        and reconnects < 2):
+                    self.log_line(f'Ошибка {acc["email"]}: {e}')
+                    break
+                reconnects += 1
+                no_stop = True
+                self.log_line(
+                    f"Связь оборвалась: {e}. Переподключение ({reconnects}/2)..."
+                )
+                time.sleep(3)
+            except Exception as e:
+                self.log_line(f'Ошибка {acc["email"]}: {e}')
+                break
         Clock.schedule_once(lambda dt: self.refresh_list())
 
-    def _fetch(self, acc, full):
+    def _fetch(self, acc, full, no_stop=False):
         addr = acc["email"]
         server = imap_server_for(addr)
         done = 0
         stop = False
         conn = None
+        self._conn_ok = False
         for attempt in range(1, 7):
             try:
                 self.log_line(f"→ Подключение к {server}..." + (f" попытка {attempt}/6" if attempt > 1 else ""))
                 conn = imaplib.IMAP4_SSL(server, 993)
                 conn.login(addr, acc["password"])
+                self._conn_ok = True
                 break
             except (OSError, imaplib.IMAP4.error, imaplib.IMAP4.abort) as e:
                 try:
@@ -1622,7 +1643,8 @@ class MainScreen(MDScreen):
                             continue
                         if storage.exists(app.db, addr, fname) and not full:
                             os.remove(tmp_path)
-                            stop = True
+                            if not no_stop:
+                                stop = True
                             continue
                         path = os.path.join(acc_dir, fname)
                         os.replace(tmp_path, path)
